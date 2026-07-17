@@ -8,19 +8,6 @@
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight"
-        WindowStartupLocation="Manual"
-        MouseLeftButtonDown="Window_MouseLeftButtonDown">
-    <Border Background="#66000000" CornerRadius="10" Padding="10" BorderThickness="1" BorderBrush="#33FFFFFF">
-        <StackPanel>
-            <TextBlock x:Name="HintText"
-                       Text="Ctrl+Alt+L : verrouiller / déverrouiller · glisser pour déplacer"
-                       Foreground="#CCFFFFFF"
-                       FontSize="10"
-                       TextWrapping="Wrap"
-                       Margin="2,0,2,6"
-                       Visibility="Collapsed" />
-            <StackPanel x:Name="MainRow" Orientation="Horizontal" />
-        </StackPanel>
-    </Border>
+        WindowStartupLocation="Manual">
+    <Canvas x:Name="RootCanvas" Background="Transparent" />
 </Window>
