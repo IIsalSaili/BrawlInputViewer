@@ -1,0 +1,113 @@
+[
+  {
+    "Action": "Gauche",
+    "Keys": [
+      "Q"
+    ],
+    "Label": "Q",
+    "Color": "#5DADE2",
+    "Symbol": "\u25C4",
+    "Group": "Movement",
+    "Slot": "Left"
+  },
+  {
+    "Action": "Droite",
+    "Keys": [
+      "D"
+    ],
+    "Label": "D",
+    "Color": "#2E86C1",
+    "Symbol": "\u25BA",
+    "Group": "Movement",
+    "Slot": "Right"
+  },
+  {
+    "Action": "Haut",
+    "Keys": [
+      "Z"
+    ],
+    "Label": "Z",
+    "Color": "#48C9B0",
+    "Symbol": "\u25B2",
+    "Group": "Movement",
+    "Slot": "Up"
+  },
+  {
+    "Action": "Bas",
+    "Keys": [
+      "S"
+    ],
+    "Label": "S",
+    "Color": "#229954",
+    "Symbol": "\u25BC",
+    "Group": "Movement",
+    "Slot": "Down"
+  },
+  {
+    "Action": "Saut",
+    "Keys": [
+      "Space"
+    ],
+    "Label": "Saut",
+    "Color": "#58D68D",
+    "Symbol": "\u21E7",
+    "Group": "Action",
+    "Slot": ""
+  },
+  {
+    "Action": "Att. l\u00E9g\u00E8re",
+    "Keys": [
+      "Left"
+    ],
+    "Label": "Att. l\u00E9g\u00E8re",
+    "Color": "#F4D03F",
+    "Symbol": "\u26A1",
+    "Group": "Action",
+    "Slot": ""
+  },
+  {
+    "Action": "Att. forte",
+    "Keys": [
+      "Right"
+    ],
+    "Label": "Att. forte",
+    "Color": "#E67E22",
+    "Symbol": "\uD83D\uDCA5",
+    "Group": "Action",
+    "Slot": ""
+  },
+  {
+    "Action": "Esquive",
+    "Keys": [
+      "LeftShift",
+      "Down"
+    ],
+    "Label": "Esquive",
+    "Color": "#E74C3C",
+    "Symbol": "\uD83D\uDCA8",
+    "Group": "Action",
+    "Slot": ""
+  },
+  {
+    "Action": "Lancer",
+    "Keys": [
+      "Up"
+    ],
+    "Label": "Lancer",
+    "Color": "#9B59B6",
+    "Symbol": "\uD83C\uDFAF",
+    "Group": "Action",
+    "Slot": ""
+  },
+  {
+    "Action": "Taunt",
+    "Keys": [
+      "G"
+    ],
+    "Label": "Taunt",
+    "Color": "#85929E",
+    "Symbol": "\uD83D\uDCAC",
+    "Group": "Action",
+    "Slot": ""
+  }
+]
