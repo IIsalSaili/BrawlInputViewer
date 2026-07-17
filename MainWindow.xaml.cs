@@ -33,7 +33,7 @@ public partial class MainWindow : Window
 
     private const int MaxHistoryEntries = 12;
     private static readonly TimeSpan MergeWindow = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan HistoryClearDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan HistoryClearDelay = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan HistoryClearStep = TimeSpan.FromMilliseconds(80);
     private static readonly TimeSpan HistoryClearStagger = TimeSpan.FromMilliseconds(40);
 
@@ -350,18 +350,21 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            // Le timer a été réinitialisé par une nouvelle entrée.
+            // Le timer a été réinitialisé par une nouvelle entrée : ne pas toucher
+            // à _lastLoggedBind/Entry/Text, RegisterMove vient de les fixer pour
+            // cette nouvelle touche (sinon son mash-merge serait cassé).
+            return;
         }
         finally
         {
             if (_historyClearCts == cts)
                 _historyClearCts = null;
-
-            _lastLoggedBind = null;
-            _lastLoggedEntry = null;
-            _lastLoggedText = null;
-            _lastLoggedCount = 0;
         }
+
+        _lastLoggedBind = null;
+        _lastLoggedEntry = null;
+        _lastLoggedText = null;
+        _lastLoggedCount = 0;
     }
 
     private void ToggleLock()

@@ -1,0 +1,56 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / IntelliJ
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+
+# Roslyn / MSBuild caches
+*.dotCover
+*.binlog
+BuildLog.htm
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# Publish output
+[Pp]ublish/
+*.pubxml
+*.pubxml.user
+*.azurePubxml
+
+# ClickOnce
+publish/
+
+# Windows
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Runtime-generated config (created next to the exe at first launch)
+keybinds.json
+
+# Crash dumps
+*.dmp
