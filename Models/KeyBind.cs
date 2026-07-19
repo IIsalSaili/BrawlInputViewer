@@ -13,6 +13,11 @@ public sealed class KeyBind
 {
     public string Action { get; set; } = "";
     public List<string> Keys { get; set; } = new();
+
+    /// <summary>Noms de boutons manette (voir GamepadHook.Buttons, ex. "A", "DPadUp"), en plus
+    /// des touches clavier — les deux déclenchent la même action, l'un n'exclut pas l'autre.</summary>
+    public List<string> GamepadButtons { get; set; } = new();
+
     public string Label { get; set; } = "";
     public string Color { get; set; } = "#FFFFFF";
 

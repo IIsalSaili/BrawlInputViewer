@@ -4,6 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -11,5 +12,14 @@
     <RootNamespace>BrawlhallaOverlay</RootNamespace>
     <Platforms>x64</Platforms>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWindowsForms auto-adds these as global usings, which collide with WPF's
+         own System.Windows.* implicit usings (Color, Point, Application, etc).
+         Code that needs WinForms types (NotifyIcon, tray menu) uses fully-qualified
+         names instead. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
 </Project>

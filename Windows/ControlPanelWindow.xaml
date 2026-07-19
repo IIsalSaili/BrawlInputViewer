@@ -1,0 +1,10 @@
+<Window x:Class="BrawlhallaOverlay.ControlPanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Brawlhalla Overlay — Panneau de contrôle"
+        Width="760" Height="520"
+        MinWidth="620" MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        Background="#1E1E1E">
+    <Grid x:Name="RootGrid" />
+</Window>
