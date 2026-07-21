@@ -28,9 +28,12 @@ namespace BrawlhallaOverlay;
 ///   marquée "Droite" fonctionne identiquement avec "Gauche").
 /// - nAir/sAir/dAir (attaque en l'air) → un "Saut" est inséré juste avant,
 ///   même bouton d'attaque ensuite (l'app ne suit pas l'état sol/air).
-/// - GC (Gravity Cancel) → un "Saut" (confirmé par gamespecifications.com qui
-///   note littéralement "Jump" aux mêmes endroits où bluestacks.com note "GC"
-///   pour les combos Canon, ex. "dLight; GC; dAir" = "DL > Jump + DAir").
+/// - GC (Gravity Cancel) → "Esquive" (correction de l'utilisateur, confirmée en
+///   jeu : le GC s'exécute en appuyant sur Esquive au bon moment en l'air pour
+///   annuler la vitesse de chute, pas en sautant — les sources écrites
+///   utilisaient un terme trompeur : gamespecifications.com note littéralement
+///   "Jump" aux mêmes endroits où bluestacks.com note "GC", ce qui avait fait
+///   coder GC comme un "Saut" par erreur dans une version précédente).
 /// - Rec (Recovery) → Haut + Att. forte (convention déjà utilisée par les
 ///   combos Gantelets créées à la main par l'utilisateur avant ce fichier).
 /// - GP (Ground Pound) → un double appui de direction seule (Bas, Bas),
@@ -91,8 +94,8 @@ public static class WeaponComboPresets
                 new[] { S("Bas", "Att. légère"), S("Saut"), S("Droite", "Att. légère") }),
             new ComboDef("DLight vers DAir", "dLight > dAir (source : bluestacks.com / gamespecifications.com).",
                 new[] { S("Bas", "Att. légère"), S("Saut"), S("Bas", "Att. légère") }),
-            new ComboDef("DLight vers Gravity Cancel puis NLight", "dLight > GC > nLight (source : bluestacks.com / gamespecifications.com).",
-                new[] { S("Bas", "Att. légère"), S("Saut"), S("Att. légère") }),
+            new ComboDef("DLight vers Gravity Cancel puis NLight", "dLight > GC > nLight (source : bluestacks.com / gamespecifications.com) — GC = Esquive au bon moment en l'air, pas Saut.",
+                new[] { S("Bas", "Att. légère"), S("Esquive"), S("Att. légère") }),
             new ComboDef("DLight vers Récupération", "dLight > Rec (source : bluestacks.com).",
                 new[] { S("Bas", "Att. légère"), S("Haut", "Att. forte") }),
         },
@@ -119,8 +122,8 @@ public static class WeaponComboPresets
                 new[] { S("Droite", "Att. légère"), S("Att. légère") }),
             new ComboDef("DAir vers DLight", "dAir > dLight (source : bluestacks.com / gamespecifications.com).",
                 new[] { S("Saut"), S("Bas", "Att. légère"), S("Bas", "Att. légère") }),
-            new ComboDef("Ground Pound vers Gravity Cancel puis DLight", "GP > GC > dLight (source : bluestacks.com / gamespecifications.com) — GP = double appui Bas en l'air.",
-                new[] { S("Bas"), S("Bas"), S("Saut"), S("Bas", "Att. légère") }),
+            new ComboDef("Ground Pound vers Gravity Cancel puis DLight", "GP > GC > dLight (source : bluestacks.com / gamespecifications.com) — GP = double appui Bas en l'air, GC = Esquive au bon moment en l'air, pas Saut.",
+                new[] { S("Bas"), S("Bas"), S("Esquive"), S("Bas", "Att. légère") }),
         },
         ["Hache"] = new[]
         {
@@ -162,8 +165,8 @@ public static class WeaponComboPresets
                 new[] { S("Att. légère"), S("Saut"), S("Att. légère") }),
             new ComboDef("SLight vers DLight", "sLight > dLight (source : theglobalgaming.com, \"Scythe guide: combo strings\").",
                 new[] { S("Droite", "Att. légère"), S("Bas", "Att. légère") }),
-            new ComboDef("NLight, NAir, SAir, Gravity Cancel, DLight", "nLight > nAir > sAir > GC > dLight (source : theglobalgaming.com, \"Scythe guide: combo strings\") — GC = un appui Saut supplémentaire pour se re-stabiliser avant le DLight au sol.",
-                new[] { S("Att. légère"), S("Saut"), S("Att. légère"), S("Droite", "Att. légère"), S("Saut"), S("Bas", "Att. légère") }),
+            new ComboDef("NLight, NAir, SAir, Gravity Cancel, DLight", "nLight > nAir > sAir > GC > dLight (source : theglobalgaming.com, \"Scythe guide: combo strings\") — GC = Esquive au bon moment en l'air pour se re-stabiliser avant le DLight au sol, pas Saut (le 1er Saut de la liste reste le vrai saut avant le nAir).",
+                new[] { S("Att. légère"), S("Saut"), S("Att. légère"), S("Droite", "Att. légère"), S("Esquive"), S("Bas", "Att. légère") }),
             new ComboDef("DLight, SLight, NLight, Saut, NAir, Récupération", "dLight > sLight > nLight > Jump > nAir > Rec (source : theglobalgaming.com, \"Scythe guide: combo strings\").",
                 new[] { S("Bas", "Att. légère"), S("Droite", "Att. légère"), S("Att. légère"), S("Saut"), S("Att. légère"), S("Haut", "Att. forte") }),
         },
@@ -171,8 +174,8 @@ public static class WeaponComboPresets
         {
             new ComboDef("NLight vers SLight", "nLight > sLight (source : bluestacks.com / gamespecifications.com).",
                 new[] { S("Att. légère"), S("Droite", "Att. légère") }),
-            new ComboDef("SLight vers Gravity Cancel puis SLight", "sLight > GC > sLight (source : bluestacks.com / gamespecifications.com).",
-                new[] { S("Droite", "Att. légère"), S("Saut"), S("Droite", "Att. légère") }),
+            new ComboDef("SLight vers Gravity Cancel puis SLight", "sLight > GC > sLight (source : bluestacks.com / gamespecifications.com) — GC = Esquive au bon moment en l'air, pas Saut.",
+                new[] { S("Droite", "Att. légère"), S("Esquive"), S("Droite", "Att. légère") }),
             new ComboDef("SLight vers DLight", "sLight > dLight (source : bluestacks.com / gamespecifications.com).",
                 new[] { S("Droite", "Att. légère"), S("Bas", "Att. légère") }),
             new ComboDef("SLight vers NLight", "sLight > nLight (source : bluestacks.com / gamespecifications.com).",
@@ -199,12 +202,12 @@ public static class WeaponComboPresets
                 new[] { S("Att. légère"), S("Saut"), S("Droite", "Att. légère") }),
             new ComboDef("NLight vers DAir", "nLight > dAir (source : bluestacks.com / gamespecifications.com).",
                 new[] { S("Att. légère"), S("Saut"), S("Bas", "Att. légère") }),
-            new ComboDef("DLight vers Gravity Cancel puis DAir", "dLight > GC > dAir (source : bluestacks.com \"GC\" = gamespecifications.com \"Jump\").",
-                new[] { S("Bas", "Att. légère"), S("Saut"), S("Bas", "Att. légère") }),
-            new ComboDef("DLight vers Gravity Cancel puis NAir", "dLight > GC > nAir (source : bluestacks.com \"GC\" = gamespecifications.com \"Jump\").",
-                new[] { S("Bas", "Att. légère"), S("Saut"), S("Att. légère") }),
-            new ComboDef("SLight vers Gravity Cancel puis SAir", "sLight > GC > sAir (source : bluestacks.com \"GC\" = gamespecifications.com \"Jump\").",
-                new[] { S("Droite", "Att. légère"), S("Saut"), S("Droite", "Att. légère") }),
+            new ComboDef("DLight vers Gravity Cancel puis DAir", "dLight > GC > dAir (source : bluestacks.com \"GC\" = gamespecifications.com \"Jump\", terme trompeur — GC = Esquive au bon moment en l'air, pas Saut).",
+                new[] { S("Bas", "Att. légère"), S("Esquive"), S("Bas", "Att. légère") }),
+            new ComboDef("DLight vers Gravity Cancel puis NAir", "dLight > GC > nAir (source : bluestacks.com \"GC\" = gamespecifications.com \"Jump\", terme trompeur — GC = Esquive au bon moment en l'air, pas Saut).",
+                new[] { S("Bas", "Att. légère"), S("Esquive"), S("Att. légère") }),
+            new ComboDef("SLight vers Gravity Cancel puis SAir", "sLight > GC > sAir (source : bluestacks.com \"GC\" = gamespecifications.com \"Jump\", terme trompeur — GC = Esquive au bon moment en l'air, pas Saut).",
+                new[] { S("Droite", "Att. légère"), S("Esquive"), S("Droite", "Att. légère") }),
         },
         ["Orbe"] = new[]
         {

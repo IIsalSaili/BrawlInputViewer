@@ -11,6 +11,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace BrawlhallaOverlay;
@@ -29,6 +30,14 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    // Ctrl+Alt+U arrive via le hook clavier bas niveau pendant que le jeu (une autre
+    // fenêtre) a le focus : Window.Activate() seul ne suffit pas toujours à passer
+    // au premier plan à cause du "foreground lock" de Windows (une fenêtre qui n'est
+    // pas déjà au premier plan ne peut normalement pas se le voler elle-même) —
+    // SetForegroundWindow explicite est nécessaire pour forcer le passage devant.
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     // Le hook WH_KEYBOARD_LL rapporte parfois le code générique (0x11/0x12)
     // et parfois le code spécifique gauche/droite (0xA2-0xA5) selon le contexte
@@ -114,15 +123,64 @@ public partial class MainWindow : Window
     private TextBlock _comboStreakText = null!;
     private ContentControl _historySlotMode1 = null!;
     private ContentControl _historySlotMode3 = null!;
-    private readonly Dictionary<int, TextBlock> _pillTextsByIndex = new();
-    private readonly Dictionary<int, string> _pillSymbolsByIndex = new();
+    // Contenu d'une pastille : un StackPanel horizontal (icône image et/ou glyphe
+    // texte par action requise) + un "?" qui le recouvre en mode révision.
+    private readonly Dictionary<int, FrameworkElement> _pillContentByIndex = new();
+    private readonly Dictionary<int, TextBlock> _pillMaskByIndex = new();
+    // Images dont la variante de couleur (noir=défaut, vert=réussie, rouge=échec)
+    // doit suivre l'état de la pastille — voir ActionIconBaseNames/SetPillIconVariant.
+    private readonly Dictionary<int, List<(string BaseName, Image Img)>> _pillIconImagesByIndex = new();
     private readonly Dictionary<int, ProgressBar> _pillBarsByIndex = new();
     private readonly Dictionary<int, TextBlock> _pillCountdownsByIndex = new();
+
+    // Actions du mode Tutoriel ayant une icône dédiée (voir logo/ et Assets/Icons/) :
+    // Taunt n'a pas d'utilité réelle dans un combo donc pas d'icône (garde son
+    // emoji). Les 4 directions partagent une seule icône de flèche (pointant à
+    // droite par défaut) tournée selon la direction — voir ActionIconRotation.
+    // Chaque icône existe en 3 variantes de couleur (fichiers
+    // Assets/Icons/<base>_<noir|vert|rouge>.png) : noir = état par défaut
+    // (à venir/courante), vert = étape réussie, rouge = flash d'échec — pas de
+    // variante jaune, l'état "courante" reste sur le noir (voir SetPillIconVariant).
+    private static readonly Dictionary<string, string> ActionIconBaseNames = new()
+    {
+        ["Saut"] = "saut",
+        ["Att. légère"] = "attaque_legere",
+        ["Att. forte"] = "attaque_forte",
+        ["Esquive"] = "esquive",
+        ["Lancer"] = "lancer",
+        ["Gauche"] = "direction",
+        ["Droite"] = "direction",
+        ["Haut"] = "direction",
+        ["Bas"] = "direction",
+    };
+
+    // direction_black/green/red.png pointe vers la droite par défaut (voir logo/13-15.png).
+    private static readonly Dictionary<string, double> ActionIconRotationDegrees = new()
+    {
+        ["Droite"] = 0,
+        ["Bas"] = 90,
+        ["Gauche"] = 180,
+        ["Haut"] = 270,
+    };
+
+    private static readonly Dictionary<string, BitmapImage> _iconImageCache = new();
+
+    private static BitmapImage GetActionIcon(string baseName, string variant)
+    {
+        var key = $"{baseName}_{variant}";
+        if (_iconImageCache.TryGetValue(key, out var cached)) return cached;
+
+        var bmp = new BitmapImage(new Uri($"pack://application:,,,/Assets/Icons/{key}.png", UriKind.Absolute));
+        _iconImageCache[key] = bmp;
+        return bmp;
+    }
     private bool _quizRevealed;
     private DispatcherTimer? _quizRevealTimer;
     private DispatcherTimer? _chainComboTimer;
     private DispatcherTimer? _toleranceCountdownTimer;
     private DispatcherTimer? _comboCompletedResetTimer;
+    private DispatcherTimer? _comboAbandonPollTimer;
+    private static readonly TimeSpan ComboAbandonTimeout = TimeSpan.FromSeconds(3);
 
     // --- Enregistrement de combo (Ctrl+Alt+R) ---
     private readonly List<(List<KeyBind> Binds, DateTime Time)> _recordedMoves = new();
@@ -493,8 +551,9 @@ public partial class MainWindow : Window
     private void RenderComboSteps()
     {
         _comboStepsPanel.Children.Clear();
-        _pillTextsByIndex.Clear();
-        _pillSymbolsByIndex.Clear();
+        _pillContentByIndex.Clear();
+        _pillMaskByIndex.Clear();
+        _pillIconImagesByIndex.Clear();
         _pillBarsByIndex.Clear();
         _pillCountdownsByIndex.Clear();
         _quizRevealed = false;
@@ -543,39 +602,89 @@ public partial class MainWindow : Window
             }
 
             var step = combo.Steps[i];
-            var symbol = string.Join("", step.RequiredActions.Select(a =>
-                AppState.Binds.FirstOrDefault(b => b.Action == a)?.Symbol ?? "?"));
-            _pillSymbolsByIndex[i] = symbol;
 
-            var symbolText = new TextBlock
+            // Une action avec icône dédiée (voir ActionIconBaseNames) affiche l'image
+            // *seule*, sans carré/fond derrière (juste des coins légèrement arrondis
+            // sur l'image elle-même) : les icônes fournies sont déjà des badges pleins,
+            // les remettre dans un carré gris translucide les écrasait visuellement —
+            // retour explicite de l'utilisateur. Une action sans icône dédiée (Taunt)
+            // garde son glyphe texte existant (Symbol du KeyBind). Quand une étape
+            // combine plusieurs actions (ex. direction + attaque), chacune reste un
+            // élément séparé avec un espacement net entre les deux, pas fusionnées
+            // dans un même bloc.
+            var iconImages = new List<(string BaseName, Image Img)>();
+            var contentPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var actionCount = step.RequiredActions.Count;
+            for (int a = 0; a < actionCount; a++)
             {
-                Text = symbol,
+                var action = step.RequiredActions[a];
+                var gap = a < actionCount - 1 ? 10.0 : 0.0;
+
+                if (ActionIconBaseNames.TryGetValue(action, out var baseName))
+                {
+                    const double size = 58;
+                    var image = new Image
+                    {
+                        Source = GetActionIcon(baseName, "black"),
+                        Width = size,
+                        Height = size,
+                        Margin = new Thickness(0, 0, gap, 0),
+                        Clip = new RectangleGeometry(new Rect(0, 0, size, size), 8, 8),
+                    };
+                    if (ActionIconRotationDegrees.TryGetValue(action, out var rotation))
+                    {
+                        image.RenderTransformOrigin = new Point(0.5, 0.5);
+                        image.RenderTransform = new RotateTransform(rotation);
+                    }
+                    iconImages.Add((baseName, image));
+                    contentPanel.Children.Add(image);
+                }
+                else
+                {
+                    var bind = AppState.Binds.FirstOrDefault(b => b.Action == action);
+                    contentPanel.Children.Add(new TextBlock
+                    {
+                        Text = bind?.Symbol ?? "?",
+                        FontSize = 34,
+                        Foreground = Brushes.White,
+                        Width = 58,
+                        TextAlignment = TextAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(0, 0, gap, 0),
+                    });
+                }
+            }
+            _pillContentByIndex[i] = contentPanel;
+            _pillIconImagesByIndex[i] = iconImages;
+
+            var mask = new TextBlock
+            {
+                Text = "?",
                 FontSize = 34,
                 Foreground = Brushes.White,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
+                Visibility = Visibility.Collapsed,
             };
-            _pillTextsByIndex[i] = symbolText;
+            _pillMaskByIndex[i] = mask;
 
-            var pill = new Border
+            // Pas de carré/fond englobant : juste un conteneur transparent (pour le
+            // masque quiz et l'opacité à venir/courante/flash) autour des icônes/glyphes.
+            var pill = new Grid
             {
-                Width = 82,
-                Height = 82,
-                CornerRadius = new CornerRadius(41),
-                Background = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(0x88, 0xFF, 0xFF, 0xFF)),
-                BorderThickness = new Thickness(2),
-                Child = symbolText,
+                MinWidth = 72,
                 Opacity = i == 0 ? 1.0 : 0.4,
                 Tag = i,
             };
+            pill.Children.Add(contentPanel);
+            pill.Children.Add(mask);
 
             // Barre fine sous la pastille : visible seulement pour l'étape courante
             // quand elle a une fenêtre de tolérance (pas la 1ère étape), se vide au
             // fil du temps restant avant que l'input soit jugé "trop lent".
             var bar = new ProgressBar
             {
-                Width = 82,
+                Width = 72,
                 Height = 4,
                 Margin = new Thickness(0, 4, 0, 0),
                 Minimum = 0,
@@ -606,12 +715,12 @@ public partial class MainWindow : Window
         UpdateComboStepVisuals();
     }
 
-    private Border? PillAt(int index)
+    private Grid? PillAt(int index)
     {
         foreach (var child in _comboStepsPanel.Children)
         {
             if (child is not StackPanel column) continue;
-            if (column.Children.Count > 0 && column.Children[0] is Border b && b.Tag is int i && i == index) return b;
+            if (column.Children.Count > 0 && column.Children[0] is Grid g && g.Tag is int i && i == index) return g;
         }
         return null;
     }
@@ -620,11 +729,29 @@ public partial class MainWindow : Window
     {
         if (_comboRunner is null) return;
 
-        foreach (var (index, text) in _pillTextsByIndex)
+        foreach (var (index, content) in _pillContentByIndex)
         {
             var hidden = AppState.Settings.QuizMode && !_quizRevealed && index >= _comboRunner.CurrentStepIndex;
-            text.Text = hidden ? "?" : _pillSymbolsByIndex.GetValueOrDefault(index, "?");
+            content.Visibility = hidden ? Visibility.Collapsed : Visibility.Visible;
+            if (_pillMaskByIndex.TryGetValue(index, out var mask)) mask.Visibility = hidden ? Visibility.Visible : Visibility.Collapsed;
         }
+    }
+
+    // Bascule la variante de couleur (voir ActionIconBaseNames) des icônes d'une
+    // pastille : "black" = état par défaut (à venir/courante, pas de variante jaune),
+    // "green" = étape déjà réussie, "red" = flash d'échec (voir FlashAllStepsRed).
+    private void SetPillIconVariant(int index, string variant)
+    {
+        if (!_pillIconImagesByIndex.TryGetValue(index, out var images)) return;
+        foreach (var (baseName, img) in images)
+        {
+            img.Source = GetActionIcon(baseName, variant);
+        }
+    }
+
+    private void SetAllPillIconVariant(string variant)
+    {
+        foreach (var index in _pillIconImagesByIndex.Keys) SetPillIconVariant(index, variant);
     }
 
     private void RevealQuizStepsTemporarily()
@@ -653,22 +780,22 @@ public partial class MainWindow : Window
         foreach (var child in _comboStepsPanel.Children)
         {
             if (child is not StackPanel column) continue;
-            if (column.Children.Count == 0 || column.Children[0] is not Border pill || pill.Tag is not int index) continue;
+            if (column.Children.Count == 0 || column.Children[0] is not Grid pill || pill.Tag is not int index) continue;
 
             if (index < _comboRunner.CurrentStepIndex)
             {
-                pill.Background = new SolidColorBrush(Color.FromArgb(0xAA, 0x2E, 0xCC, 0x71)); // vert
                 pill.Opacity = 1.0;
+                SetPillIconVariant(index, "green"); // étape déjà réussie
             }
             else if (index == _comboRunner.CurrentStepIndex)
             {
-                pill.Background = new SolidColorBrush(Color.FromArgb(0xAA, 0xF4, 0xD0, 0x3F)); // jaune
                 pill.Opacity = 1.0;
+                SetPillIconVariant(index, "black"); // pas de variante jaune pour les icônes
             }
             else
             {
-                pill.Background = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
-                pill.Opacity = 0.4;
+                pill.Opacity = 0.4; // à venir
+                SetPillIconVariant(index, "black");
             }
         }
 
@@ -729,7 +856,7 @@ public partial class MainWindow : Window
         var pill = PillAt(index);
         if (pill is null) return;
 
-        pill.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0xCC, 0x71));
+        SetPillIconVariant(index, "green");
         var flash = new DoubleAnimation(1.0, 0.4, TimeSpan.FromMilliseconds(120)) { AutoReverse = true };
         pill.BeginAnimation(OpacityProperty, flash);
     }
@@ -743,17 +870,12 @@ public partial class MainWindow : Window
     private void FlashAllStepsRed(ComboFailReason reason)
     {
         HideAllToleranceBars();
-
-        var color = reason == ComboFailReason.Timeout
-            ? Color.FromRgb(0xF3, 0x9C, 0x12) // orange : trop lent
-            : Color.FromRgb(0xE7, 0x4C, 0x3C); // rouge : mauvaise touche
-        var brush = new SolidColorBrush(color);
+        SetAllPillIconVariant("red"); // pas de variante orange dédiée : Timeout n'est de toute façon jamais levé (voir ComboFailReason)
 
         foreach (var child in _comboStepsPanel.Children)
         {
-            if (child is not StackPanel column || column.Children.Count == 0 || column.Children[0] is not Border pill) continue;
+            if (child is not StackPanel column || column.Children.Count == 0 || column.Children[0] is not Grid pill) continue;
 
-            pill.Background = brush;
             pill.Opacity = 1.0;
 
             var blink = new DoubleAnimation(1.0, 0.15, FailBlinkStep)
@@ -784,6 +906,7 @@ public partial class MainWindow : Window
             _comboRunner.StepFailed -= OnComboStepFailed;
             _comboRunner.ComboCompleted -= OnComboCompleted;
             _comboRunner.ComboReset -= OnComboReset;
+            _comboRunner.ComboAbandoned -= OnComboAbandoned;
         }
 
         var index = AppState.ActiveComboIndex;
@@ -798,6 +921,7 @@ public partial class MainWindow : Window
             _comboRunner.StepFailed += OnComboStepFailed;
             _comboRunner.ComboCompleted += OnComboCompleted;
             _comboRunner.ComboReset += OnComboReset;
+            _comboRunner.ComboAbandoned += OnComboAbandoned;
         }
 
         RenderComboSteps();
@@ -908,6 +1032,29 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
+            _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
+
+            var combo = _comboRunner?.Combo;
+            if (combo is not null)
+            {
+                combo.TotalAttempts++;
+                AppState.SaveCombosQuiet();
+            }
+        });
+    }
+
+    // Contrairement à OnComboReset (déclenché par une mauvaise touche, dont l'affichage
+    // est remis à zéro par FlashAllStepsRed une fois son clignotement terminé — voir le
+    // commentaire au-dessus d'OnComboReset), un abandon par inactivité n'a aucune
+    // animation de faute à attendre : on remet l'affichage à l'état d'attente ici, tout
+    // de suite, sans flash rouge ni son (ce n'est pas une faute de frappe, juste un
+    // "il a arrêté").
+    private void OnComboAbandoned()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            HideAllToleranceBars();
+            UpdateComboStepVisuals();
             _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
 
             var combo = _comboRunner?.Combo;
@@ -1078,6 +1225,14 @@ public partial class MainWindow : Window
             FlushPendingBinds();
         };
 
+        // Poll indépendant du clavier (contrairement à _comboTimer, jamais redémarré à
+        // chaque appui) : c'est justement l'absence d'appui qu'on veut détecter, pour
+        // abandonner une combo en cours si le joueur ne l'a pas poursuivie depuis
+        // ComboAbandonTimeout (voir ComboRunner.CheckAbandon).
+        _comboAbandonPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _comboAbandonPollTimer.Tick += (_, _) => _comboRunner?.CheckAbandon(DateTime.UtcNow, ComboAbandonTimeout);
+        _comboAbandonPollTimer.Start();
+
         AppState.Hook.KeyDown += OnGlobalKeyDown;
         AppState.Hook.KeyUp += OnGlobalKeyUp;
         AppState.Hook.Start();
@@ -1217,6 +1372,9 @@ public partial class MainWindow : Window
                 _controlPanel.WindowState = WindowState.Normal;
             _controlPanel.Activate();
         }
+
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(_controlPanel).EnsureHandle();
+        SetForegroundWindow(hwnd);
     }
 
     private void RepositionPanel(Border panel)

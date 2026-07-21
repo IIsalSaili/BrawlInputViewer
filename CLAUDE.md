@@ -525,6 +525,118 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   même problème ; à auditer arme par arme (fetch réel de la source citée,
   comparaison littérale) si l'utilisateur signale d'autres combos fausses ou
   demande un audit complet.
+- Abandon de combo par inactivité : demande explicite de l'utilisateur — une
+  tentative en cours (au moins une étape validée) qui reste sans input pendant
+  3s doit se réinitialiser toute seule plutôt que de rester bloquée en
+  attendant indéfiniment la suite. Implémenté comme un mécanisme séparé du
+  timing par étape (qui, lui, reste volontairement retiré comme condition
+  d'échec — voir plus haut) : `ComboRunner.CheckAbandon(now, timeout)` est un
+  **poll**, pas un événement déclenché par une touche — `MainWindow` l'appelle
+  toutes les 300ms via `_comboAbandonPollTimer`, indépendamment de toute
+  frappe (contrairement à `_comboTimer`, qui lui se relance à chaque appui).
+  Sans appel à `Feed` depuis 3s (`ComboAbandonTimeout`) et une étape déjà en
+  cours (`CurrentStepIndex > 0`), la combo se réinitialise et lève un nouvel
+  event `ComboAbandoned` (distinct de `ComboReset`, qui reste réservé à
+  l'échec par mauvaise touche) : contrairement à un échec, il n'y a pas de
+  clignotement rouge à attendre avant de rafraîchir l'affichage (pas de
+  `FlashAllStepsRed` déclenché), donc `OnComboAbandoned` remet direct les
+  pastilles à l'état d'attente.
+- Icônes d'action du mode Tutoriel (dossier `logo/` fourni par l'utilisateur) :
+  18 fichiers PNG = 6 icônes distinctes (épées croisées, couteau, silhouette
+  qui court, triple chevron, flèche épaisse, éclat/griffe) déclinées chacune
+  en 3 carrés pleins non détourés (fond blanc/vert/rouge). Après clarification
+  avec l'utilisateur : 5 des 6 icônes remplacent les emoji Unicode des
+  pastilles de combo du mode Tutoriel (Saut→chevron, Att. légère→couteau,
+  Att. forte→épées croisées, Esquive→silhouette, Lancer→éclat — l'éclat
+  représente le lancer d'arme, pas Taunt, qui n'a pas d'utilité réelle dans un
+  combo et garde son emoji 💬) ; la flèche épaisse (`13/14/15.png`) n'est pas
+  utilisée. Portée volontairement limitée aux pastilles du mode Tutoriel pour
+  l'instant (l'historique et les gros boutons des modes 1/2 gardent leurs
+  emoji). Fichiers copiés (pas détourés, gardés en carrés pleins tels quels,
+  par choix explicite de l'utilisateur) dans `Assets/Icons/<action>_<couleur>.png`,
+  déclarés `<Resource>` dans le `.csproj` (embarqués dans l'assembly, chargés
+  par pack URI via `MainWindow.GetActionIcon`, pas de copie à côté de l'exe).
+  Mapping action → nom de fichier de base dans `MainWindow.ActionIconBaseNames`
+  (dictionnaire en dur, pas de nouveau champ dans `KeyBind`/`keybinds.json`
+  pour éviter la régénération de schéma). Les 3 couleurs suivent l'état de la
+  pastille (pas de variante jaune) : noir = par défaut (à venir/courante),
+  vert = étape déjà réussie, rouge = flash d'échec — géré par
+  `MainWindow.SetPillIconVariant`/`SetAllPillIconVariant`, appelés depuis
+  `UpdateComboStepVisuals`/`FlashComboStepSuccess`/`FlashAllStepsRed`. Le `logo/`
+  original reste sur le disque (pas versionné a priori, à la racine) au cas où
+  d'autres icônes du lot seraient réutilisées plus tard.
+  Retour immédiat de l'utilisateur, deux corrections : (1) la flèche épaisse
+  finalement utilisée pour les 4 directions (Gauche/Droite/Haut/Bas), qui
+  gardaient leur glyphe texte ◄►▲▼ — une seule icône `direction_<couleur>.png`
+  (pointant à droite par défaut) tournée via `RenderTransform`/`RotateTransform`
+  selon l'action (`ActionIconRotationDegrees` : Droite=0°, Bas=90°,
+  Gauche=180°, Haut=270°), donc toutes les actions de la pastille de combo ont
+  désormais une icône sauf Taunt. (2) Les pastilles étaient restées des ronds
+  (`CornerRadius` = moitié de la largeur) alors que les icônes fournies sont
+  des carrés pleins — ça écrasait les images au centre avec des bandes vides
+  sur les côtés. Passé en carré à coins arrondis (`CornerRadius(14)`, 72×72,
+  icône 58×58) pour coller à la forme réelle des designs plutôt que d'imposer
+  une forme d'UI générique par-dessus.
+  Nouveau retour, deux corrections supplémentaires sur ce même chantier : (1)
+  le carré à coins arrondis restait un carré *avec un fond gris translucide*
+  derrière l'image — toujours pas ce qui était demandé. Supprimé entièrement :
+  la pastille est maintenant un `Grid` transparent (aucun `Background`) qui ne
+  sert qu'à gérer l'opacité (à venir/courante) et le masque quiz ; chaque icône
+  a directement ses coins légèrement arrondis via `Image.Clip` (un
+  `RectangleGeometry` de rayon 8, pas de conteneur autour). Les états
+  succès/échec ne sont plus indiqués par une couleur de fond mais uniquement
+  par la variante de couleur de l'icône elle-même (vert/rouge, voir
+  `SetPillIconVariant`) + un clignotement d'opacité. (2) Quand une étape combine
+  plusieurs actions (ex. direction + attaque), les images étaient collées les
+  unes aux autres dans le même `StackPanel` sans espace — séparées avec une
+  marge nette (10px) entre chaque élément pour qu'elles se lisent comme deux
+  icônes distinctes plutôt qu'un bloc fusionné.
+- Correctif Gravity Cancel : retour de l'utilisateur (confirmé en jeu) que le
+  Gravity Cancel s'exécute en appuyant sur **Esquive** au bon moment en l'air
+  pour annuler la vitesse de chute — pas en sautant. `WeaponComboPresets.cs`
+  codait pourtant GC comme un "Saut" partout (7 combos sur 5 armes : Marteau,
+  Katars, Faux, Épée à deux mains, Canon ×3), une décision de la Version 8
+  justifiée à l'époque par une concordance entre deux sources écrites
+  (gamespecifications.com note littéralement "Jump" aux mêmes endroits où
+  bluestacks.com note "GC") — concordance qui s'est donc révélée être une
+  erreur de terminologie partagée par les deux sources, pas une confirmation
+  valide. Les 7 occurrences ont été corrigées (`S("Saut")` → `S("Esquive")`
+  uniquement pour l'étape représentant le GC — le combo Faux a un vrai second
+  "Saut" pour un nAir juste avant, resté inchangé), et le docstring de
+  traduction en tête de fichier mis à jour. Leçon : une concordance entre
+  plusieurs sources écrites n'est pas une garantie contre l'erreur si aucune
+  n'a été vérifiée contre le jeu réel — le test en jeu de l'utilisateur reste
+  la source de vérité finale, prioritaire sur toute doc communautaire (déjà
+  la leçon de "Correctif Faux" ci-dessus, qui se confirme ici sur un autre axe).
+- Ctrl+Alt+U n'amenait pas toujours `ControlPanelWindow` au premier plan quand
+  déclenché pendant que le jeu avait le focus (hook clavier bas niveau global,
+  donc l'app n'est pas la fenêtre active au moment de l'appui) : `Activate()`
+  seul ne suffit pas à cause du "foreground lock" de Windows (une fenêtre qui
+  n'est pas déjà active ne peut normalement pas voler le focus toute seule).
+  Corrigé en appelant explicitement `SetForegroundWindow` (P/Invoke user32,
+  comme le reste des interop bas niveau de `MainWindow`) sur le handle du
+  panneau juste après `Show()`/`Activate()`.
+- Enregistrement de combo dans `ComboEditorWindow` (deux passes, la 1ère jugée
+  insuffisante par l'utilisateur) : le texte libre par étape (taper les noms
+  d'action à la main) a été entièrement remplacé par un système de puces —
+  chaque étape a un bouton "Écouter" qui capture **une seule** touche/bouton à
+  la fois (`ListenForNextBindAction`, même mécanique que `ListenForNextKey` de
+  l'onglet Touches : un seul `KeyDown`/`ButtonDown`, résolu en nom d'action via
+  `KeyBind.VirtualKeyCodes`, pas de fenêtre de temps). Une 1ère version
+  utilisait une fenêtre glissante de 250ms pour regrouper automatiquement
+  plusieurs touches pressées ensemble en une seule étape — rejetée : l'utilisateur
+  voulait un contrôle explicite, pas une détection automatique par timing.
+  Le système retenu : recliquer "Écouter" **sur la même ligne** ajoute une
+  puce de plus à cette étape (simultané, ex. Droite + Att. légère) ; cliquer
+  "+ Ajouter une étape" démarre une ligne séparée. Chaque puce a son propre
+  ✕ pour la retirer individuellement. La liste d'actions d'une étape est
+  stockée directement dans `Grid.Tag` (`List<string>` mutable, alimentée
+  uniquement par clics) — `SaveAndClose` la relit telle quelle, il n'y a plus
+  de texte à parser/valider pour un nom d'action mal orthographié (les puces
+  ne peuvent contenir qu'une action réellement liée à une touche existante).
+  Une seule écoute active à la fois : `_cancelActiveListen` coupe proprement
+  celle en cours si un autre bouton "Écouter" est cliqué ou si la fenêtre se
+  ferme pendant l'écoute.
 
 ## Pistes évoquées mais pas demandées/faites
 

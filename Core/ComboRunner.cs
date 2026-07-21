@@ -79,6 +79,8 @@ public sealed class ComboRunner
     {
         if (Combo.Steps.Count == 0) return;
 
+        _lastFeedUtc = timestamp;
+
         var step = Combo.Steps[CurrentStepIndex];
         var required = new HashSet<string>(step.RequiredActions);
 
@@ -176,5 +178,23 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
+    }
+
+    /// <summary>Appelé périodiquement (polling, pas à chaque input) pour abandonner
+    /// une tentative en cours si le joueur n'a rien pressé depuis <paramref name="timeout"/> :
+    /// pas une faute de timing sur une étape (voir docstring de classe, le timing n'est
+    /// jamais un échec), juste un "il a arrêté, on relâche l'attente" pour ne pas rester
+    /// bloqué indéfiniment au milieu d'une combo. Sans effet tant qu'aucune étape n'a
+    /// encore été validée (rien à abandonner).</summary>
+    public void CheckAbandon(DateTime now, TimeSpan timeout)
+    {
+        if (CurrentStepIndex == 0) return;
+        if (now - _lastFeedUtc < timeout) return;
+
+        if (!KeepStreakOnFail) Streak = 0;
+        CurrentStepIndex = 0;
+        State = ComboRunState.Waiting;
+        _lastConsumedActionKeys = new HashSet<string>();
+        ComboAbandoned?.Invoke();
     }
 }
