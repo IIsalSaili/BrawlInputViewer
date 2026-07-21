@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 using System.Windows.Input;
 
 namespace BrawlhallaOverlay;
@@ -67,22 +66,7 @@ public static class KeyBindConfig
 
     public static List<KeyBind> LoadProfile(string profileName)
     {
-        List<KeyBind>? binds = null;
-        var path = ProfilePath(profileName);
-
-        if (File.Exists(path))
-        {
-            try
-            {
-                var json = File.ReadAllText(path);
-                binds = JsonSerializer.Deserialize<List<KeyBind>>(json);
-            }
-            catch
-            {
-                // Fichier corrompu ou mal formé : on retombe sur les valeurs par défaut.
-                binds = null;
-            }
-        }
+        var binds = JsonFileStore.Load<List<KeyBind>?>(ProfilePath(profileName), null);
 
         if (binds is null || binds.Count == 0)
         {
@@ -95,11 +79,8 @@ public static class KeyBindConfig
         return binds;
     }
 
-    public static void SaveProfile(string profileName, List<KeyBind> binds)
-    {
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(ProfilePath(profileName), JsonSerializer.Serialize(binds, options));
-    }
+    public static void SaveProfile(string profileName, List<KeyBind> binds) =>
+        JsonFileStore.Save(ProfilePath(profileName), binds);
 
     public static void DeleteProfile(string profileName)
     {
@@ -122,12 +103,6 @@ public static class KeyBindConfig
             }
             bind.VirtualKeyCodes = codes;
         }
-    }
-
-    public static void Save(List<KeyBind> binds)
-    {
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(binds, options));
     }
 
     private static int ResolveVirtualKeyCode(string keyName)

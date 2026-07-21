@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Text.Json;
 
 namespace BrawlhallaOverlay;
 
@@ -18,28 +17,10 @@ public static class OverlaySettingsConfig
     public static OverlaySettings LoadOrCreateDefault()
     {
         WasFirstRun = !File.Exists(ConfigPath);
-        if (File.Exists(ConfigPath))
-        {
-            try
-            {
-                var json = File.ReadAllText(ConfigPath);
-                var loaded = JsonSerializer.Deserialize<OverlaySettings>(json);
-                if (loaded is not null) return loaded;
-            }
-            catch
-            {
-                // Fichier corrompu : retombe sur les valeurs par défaut.
-            }
-        }
-
-        var settings = new OverlaySettings();
-        Save(settings);
+        var settings = JsonFileStore.Load<OverlaySettings?>(ConfigPath, null) ?? new OverlaySettings();
+        if (WasFirstRun) Save(settings);
         return settings;
     }
 
-    public static void Save(OverlaySettings settings)
-    {
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(settings, options));
-    }
+    public static void Save(OverlaySettings settings) => JsonFileStore.Save(ConfigPath, settings);
 }

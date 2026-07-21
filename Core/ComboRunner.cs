@@ -91,9 +91,7 @@ public sealed class ComboRunner
             .Where(b => b.Group == "Movement").Select(b => b.Action));
         var pressedAction = new HashSet<string>(pressedBindsThisTick
             .Where(b => b.Group != "Movement").Select(b => b.Action));
-        var requiredMovementNames = new HashSet<string>(required.Where(a =>
-            pressedBindsThisTick.Any(b => b.Action == a && b.Group == "Movement") || IsKnownMovement(a)));
-        var requiredAction = new HashSet<string>(required.Except(requiredMovementNames));
+        var (requiredMovementNames, requiredAction) = SplitByMovement(required, pressedBindsThisTick);
 
         bool movementOk = requiredMovementNames.IsSubsetOf(pressedMovement);
 
@@ -143,11 +141,8 @@ public sealed class ComboRunner
         // dans la boucle, et le retour périodique de la 1ère touche était toléré comme du
         // mash au lieu de reset). Ne s'applique qu'à partir de la 2ème étape : à l'étape 0,
         // c'est justement l'input attendu.
-        var firstStep = Combo.Steps[0];
-        var firstRequired = new HashSet<string>(firstStep.RequiredActions);
-        var firstRequiredMovementNames = new HashSet<string>(firstRequired.Where(a =>
-            pressedBindsThisTick.Any(b => b.Action == a && b.Group == "Movement") || IsKnownMovement(a)));
-        var firstRequiredAction = new HashSet<string>(firstRequired.Except(firstRequiredMovementNames));
+        var firstRequired = new HashSet<string>(Combo.Steps[0].RequiredActions);
+        var (_, firstRequiredAction) = SplitByMovement(firstRequired, pressedBindsThisTick);
         bool firstStepInputRecurring = CurrentStepIndex != 0 && wrongActions.SetEquals(firstRequiredAction);
 
         // Mash/répétition du bouton qui vient de valider l'étape précédente (ex. cliquer
@@ -171,6 +166,18 @@ public sealed class ComboRunner
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
         ComboReset?.Invoke();
+    }
+
+    /// <summary>Sépare un ensemble d'actions requises en (directions, boutons d'action),
+    /// en se basant sur le Group du bind pressé ce tick, ou sur IsKnownMovement en
+    /// secours si la direction requise n'est plus tenue à cet instant.</summary>
+    private static (HashSet<string> movement, HashSet<string> action) SplitByMovement(
+        HashSet<string> required, List<KeyBind> pressedBindsThisTick)
+    {
+        var movement = new HashSet<string>(required.Where(a =>
+            pressedBindsThisTick.Any(b => b.Action == a && b.Group == "Movement") || IsKnownMovement(a)));
+        var action = new HashSet<string>(required.Except(movement));
+        return (movement, action);
     }
 
     /// <summary>Combos enregistrées ou importées peuvent contenir un nom d'action de

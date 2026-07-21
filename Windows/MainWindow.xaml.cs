@@ -1496,28 +1496,25 @@ public partial class MainWindow : Window
         // avancer/rater silencieusement la combo en cours (voir AppState.CaptureSuspended).
         if (AppState.CaptureSuspended) return;
 
-        if (_brushesByVk.TryGetValue(vkCode, out var brushes))
-        {
-            Dispatcher.Invoke(() =>
-            {
-                foreach (var brush in brushes) brush.Opacity = 1.0;
-            });
-        }
-
-        if (_colorSwapByVk.TryGetValue(vkCode, out var swapBrushes))
-        {
-            Dispatcher.Invoke(() =>
-            {
-                foreach (var brush in swapBrushes) brush.Color = ArrowPressedColor;
-            });
-        }
+        var hasBrushes = _brushesByVk.TryGetValue(vkCode, out var brushes);
+        var hasSwapBrushes = _colorSwapByVk.TryGetValue(vkCode, out var swapBrushes);
 
         // Ignore l'auto-répétition OS : un seul événement d'historique par appui,
         // pas une rafale tant que la touche reste enfoncée.
-        if (_pressedVks.Add(vkCode) && _bindsByVk.TryGetValue(vkCode, out var bind))
+        KeyBind? bind = null;
+        var shouldQueueBind = _pressedVks.Add(vkCode) && _bindsByVk.TryGetValue(vkCode, out bind);
+
+        if (!hasBrushes && !hasSwapBrushes && !shouldQueueBind) return;
+
+        // Un seul aller-retour vers le thread UI pour les trois mutations, plutôt
+        // que trois Dispatcher.Invoke séparés sur le chemin le plus chaud de l'app
+        // (appelé pour chaque frappe, clavier comme manette).
+        Dispatcher.Invoke(() =>
         {
-            Dispatcher.Invoke(() => QueuePendingBind(bind));
-        }
+            if (hasBrushes) foreach (var brush in brushes!) brush.Opacity = 1.0;
+            if (hasSwapBrushes) foreach (var brush in swapBrushes!) brush.Color = ArrowPressedColor;
+            if (shouldQueueBind) QueuePendingBind(bind!);
+        });
     }
 
     // Recalcule à chaque nouvel appui l'ensemble des touches *actuellement* enfoncées
@@ -1567,21 +1564,15 @@ public partial class MainWindow : Window
 
         if (AppState.CaptureSuspended) return;
 
-        if (_brushesByVk.TryGetValue(vkCode, out var brushes))
-        {
-            Dispatcher.Invoke(() =>
-            {
-                foreach (var brush in brushes) brush.Opacity = _restOpacityByBrush[brush];
-            });
-        }
+        var hasBrushes = _brushesByVk.TryGetValue(vkCode, out var brushes);
+        var hasSwapBrushes = _colorSwapByVk.TryGetValue(vkCode, out var swapBrushes);
+        if (!hasBrushes && !hasSwapBrushes) return;
 
-        if (_colorSwapByVk.TryGetValue(vkCode, out var swapBrushes))
+        Dispatcher.Invoke(() =>
         {
-            Dispatcher.Invoke(() =>
-            {
-                foreach (var brush in swapBrushes) brush.Color = ArrowRestColor;
-            });
-        }
+            if (hasBrushes) foreach (var brush in brushes!) brush.Opacity = _restOpacityByBrush[brush];
+            if (hasSwapBrushes) foreach (var brush in swapBrushes!) brush.Color = ArrowRestColor;
+        });
     }
 
     private void RegisterMove(List<KeyBind> binds)

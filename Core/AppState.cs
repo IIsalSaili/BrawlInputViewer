@@ -110,9 +110,7 @@ public static class AppState
     public static void ReplaceBinds(List<KeyBind> binds)
     {
         _binds = binds;
-        KeyBindConfig.RecomputeVirtualKeyCodes(_binds);
-        KeyBindConfig.SaveProfile(Settings.ActiveProfile, _binds);
-        BindsChanged?.Invoke();
+        NotifyBindsMutated();
     }
 
     /// <summary>Call after mutating Binds/KeyBind items in place (color, symbol, keys...).</summary>
@@ -154,9 +152,7 @@ public static class AppState
     public static void ReplaceCombos(List<Combo> combos)
     {
         _combos = combos;
-        ComboConfig.Save(_combos);
-        CombosChanged?.Invoke();
-        if (ActiveComboIndex < 0 || ActiveComboIndex >= _combos.Count) SetActiveCombo(FirstFilteredIndex());
+        NotifyCombosMutated();
     }
 
     /// <summary>Call after mutating Combos/Combo items in place (add/edit/delete/reorder).</summary>

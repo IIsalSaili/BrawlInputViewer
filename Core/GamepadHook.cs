@@ -17,6 +17,12 @@ public sealed class GamepadHook : IDisposable
 {
     public const int SyntheticCodeBase = 0x10000;
 
+    // 16ms (~60Hz) une fois une manette détectée, pour ne pas rater d'appui ;
+    // 250ms tant qu'aucune manette n'est connectée (cas courant, clavier seul)
+    // pour ne pas spammer XInputGetState ~60 fois/sec pour rien.
+    private static readonly TimeSpan PollIntervalConnected = TimeSpan.FromMilliseconds(16);
+    private static readonly TimeSpan PollIntervalDisconnected = TimeSpan.FromMilliseconds(250);
+
     public static readonly (string Name, ushort Flag)[] Buttons =
     {
         ("DPadUp", 0x0001), ("DPadDown", 0x0002), ("DPadLeft", 0x0004), ("DPadRight", 0x0008),
@@ -74,7 +80,7 @@ public sealed class GamepadHook : IDisposable
 
     public GamepadHook()
     {
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _timer = new DispatcherTimer { Interval = PollIntervalDisconnected };
         _timer.Tick += (_, _) => Poll();
     }
 
@@ -112,6 +118,7 @@ public sealed class GamepadHook : IDisposable
         if (connectedNow != _connected)
         {
             _connected = connectedNow;
+            _timer.Interval = connectedNow ? PollIntervalConnected : PollIntervalDisconnected;
             ConnectionChanged?.Invoke(_connected);
         }
 
