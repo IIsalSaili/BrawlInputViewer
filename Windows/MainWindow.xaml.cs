@@ -319,13 +319,18 @@ public partial class MainWindow : Window
         {
             Width = 1,
             Margin = new Thickness(12, 2, 12, 2),
-            Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
+            // Séparateur en accent doré (signature de marque reprise de la tray icon,
+            // voir Brawhl.md) plutôt qu'un simple liseré blanc générique.
+            Background = new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0xC4, 0x4A)),
         });
         mainRow.Children.Add(BuildHistoryContainer());
 
         var panel = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00)),
+            // Fond bleu-nuit teinté plutôt que noir neutre (cohérent avec le panneau
+            // de contrôle, voir Brawhl.md section 4) — même niveau de transparence
+            // qu'avant, seule la teinte change.
+            Background = new SolidColorBrush(Color.FromArgb(0x66, 0x1B, 0x1B, 0x24)),
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(10),
             BorderThickness = new Thickness(1),
@@ -532,11 +537,15 @@ public partial class MainWindow : Window
 
         var panel = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0x77, 0x00, 0x00, 0x00)),
+            // Même teinte bleu-nuit que le mode 1 (cohérence de marque, Brawhl.md
+            // section 4). Bordure basse plus épaisse en accent doré : évoque le motif
+            // "nameplate" (écusson) récurrent de l'UI Brawlhalla sans reproduire une
+            // forme complexe qui risquerait de casser le layout existant.
+            Background = new SolidColorBrush(Color.FromArgb(0x77, 0x1B, 0x1B, 0x24)),
             CornerRadius = new CornerRadius(14),
             Padding = new Thickness(24, 18, 24, 18),
-            BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1, 1, 1, 3),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x66, 0xE8, 0xC4, 0x4A)),
             Child = content,
         };
 

@@ -19,10 +19,14 @@ namespace BrawlhallaOverlay;
 public partial class ControlPanelWindow : Window
 {
     private static readonly string[] TabNames = { "Général", "Touches", "Combos", "Apparence", "À propos" };
-    private static readonly Brush PanelBg = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
-    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2A));
+    // Fond bleu-nuit/violet sombre (au lieu du gris neutre d'origine) + accent doré
+    // repris de la tray icon (#E8C44A) : signature de marque cohérente avec l'overlay
+    // et le motif "écusson" de l'UI Brawlhalla — voir Brawhl.md section 4/7.
+    private static readonly Brush PanelBg = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22));
+    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x27, 0x35));
     private static readonly Brush TextColor = Brushes.White;
     private static readonly Brush SubtleText = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA));
+    private static readonly Brush AccentGold = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A));
 
     private ContentControl _content = null!;
     private ListBox _nav = null!;
@@ -52,6 +56,19 @@ public partial class ControlPanelWindow : Window
         {
             _nav.Items.Add(new ListBoxItem { Content = name, Padding = new Thickness(16, 10, 16, 10) });
         }
+
+        // Onglet actif marqué d'un liseré doré à gauche (accent de marque) plutôt que
+        // la surbrillance système par défaut — BorderThickness posé même à l'état
+        // non sélectionné (brush transparent) pour que la largeur ne saute pas au clic.
+        var navItemStyle = new Style(typeof(ListBoxItem));
+        navItemStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(3, 0, 0, 0)));
+        navItemStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.Transparent));
+        var selectedTrigger = new Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true };
+        selectedTrigger.Setters.Add(new Setter(Control.BorderBrushProperty, AccentGold));
+        selectedTrigger.Setters.Add(new Setter(Control.BackgroundProperty, CardBg));
+        navItemStyle.Triggers.Add(selectedTrigger);
+        _nav.ItemContainerStyle = navItemStyle;
+
         _nav.SelectionChanged += (_, _) => ShowTab(_nav.SelectedIndex);
         // La nav garde le focus clavier par défaut, et ses flèches (ou même une
         // lettre comme "G", qui saute au premier onglet commençant par G via la
@@ -97,7 +114,7 @@ public partial class ControlPanelWindow : Window
         Text = text,
         FontSize = 18,
         FontWeight = FontWeights.Bold,
-        Foreground = TextColor,
+        Foreground = AccentGold,
         Margin = new Thickness(0, 0, 0, 14),
     };
 

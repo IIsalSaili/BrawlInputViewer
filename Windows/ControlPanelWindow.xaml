@@ -5,6 +5,6 @@
         Width="960" Height="640"
         MinWidth="900" MinHeight="520"
         WindowStartupLocation="CenterScreen"
-        Background="#1E1E1E">
+        Background="#181722">
     <Grid x:Name="RootGrid" />
 </Window>

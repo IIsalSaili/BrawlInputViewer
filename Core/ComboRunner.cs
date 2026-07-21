@@ -101,8 +101,16 @@ public sealed class ComboRunner
         {
             _lastConsumedActionKeys = requiredAction;
             State = ComboRunState.InProgress;
-            StepSucceeded?.Invoke(CurrentStepIndex);
+
+            // CurrentStepIndex doit avancer AVANT de lever StepSucceeded : les handlers UI
+            // (UpdateComboStepVisuals, ApplyQuizMask) comparent l'index reçu à CurrentStepIndex
+            // pour décider si une pastille est "déjà réussie" (vert) ou "courante" (noir/masquée).
+            // Avec l'ancien ordre (event levé avant l'incrément), le handler voyait encore l'étape
+            // qui vient de réussir comme "courante" et la repassait en noir — elle n'apparaissait
+            // vraiment vert qu'au Feed suivant (décalage d'un input, signalé par l'utilisateur).
+            var succeededIndex = CurrentStepIndex;
             CurrentStepIndex++;
+            StepSucceeded?.Invoke(succeededIndex);
 
             if (CurrentStepIndex >= Combo.Steps.Count)
             {
