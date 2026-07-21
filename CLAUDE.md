@@ -103,6 +103,11 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   si `combos.json` contient déjà des combos, la première devient active
   automatiquement (sinon le mode Tutoriel affichait "Aucune combo" alors
   qu'il y en avait — bug corrigé, voir Historique des décisions).
+  `CaptureSuspended` (+ `CaptureSuspendedChanged`, bascule `Ctrl+Alt+H`) coupe
+  le traitement des touches côté `MainWindow` (allumage, historique,
+  `ComboRunner.Feed`) sans désinstaller le hook ni fermer l'app — utile car
+  `KeyboardHook`/`GamepadHook` captent globalement même hors du jeu (voir
+  Version 10 de l'historique).
 - **Models/Combo.cs / ComboStep.cs**, **Core/ComboRunner.cs** — modèle et
   moteur du mode Tutoriel : une `Combo` est une séquence de `ComboStep`
   (ensemble d'`Action` à jouer ensemble + fenêtre de tolérance de timing
@@ -341,6 +346,7 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
 | `Ctrl+Alt+R` | Démarrer / arrêter l'enregistrement d'une combo       |
 | `Ctrl+Alt+U` | Ouvrir / donner le focus au panneau de contrôle       |
 | `Ctrl+Alt+I` | Révéler temporairement (3s) la combo active en mode révision |
+| `Ctrl+Alt+H` | Suspendre / reprendre la capture globale (voir `AppState.CaptureSuspended` ci-dessous) |
 
 ## Historique des décisions (contexte utilisateur)
 
@@ -459,6 +465,66 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   l'utilisateur ne peut pas distinguer une approximation documentée d'une
   pure invention tant que ce n'est pas marqué comme telle, et ici ce n'était
   ni l'un ni l'autre : c'était juste faux.
+- Version 10 (audit ergonomique "premier utilisateur" + corrections) : un
+  agent jouant le rôle d'un tout premier utilisateur (config vierge, jamais
+  lancé) a testé le parcours complet jusqu'au mode Tutoriel et relevé 9
+  points de friction, tous corrigés :
+  - Icône de tray générique (`SystemIcons.Application`, indiscernable des
+    autres icônes système) → icône dessinée au runtime (`MainWindow.
+    CreateTrayIcon`), cercle sombre + "B" doré.
+  - Aucune indication au tout premier lancement → `OverlaySettingsConfig.
+    WasFirstRun` (vrai si `settings.json` n'existait pas encore) déclenche un
+    ballon d'info sur l'icône de tray + un affichage temporaire (12s) du
+    bandeau de raccourcis normalement réservé au mode déverrouillé
+    (`MainWindow.ShowFirstRunHintIfNeeded`).
+  - `ControlPanelWindow` trop étroite par défaut (760×520) : l'onglet Combos
+    tronquait son propre bouton d'import et cachait le bouton Supprimer
+    derrière une scrollbar horizontale peu visible → agrandie à 960×640
+    (`MinWidth` 900).
+  - Liste de combos vide sans aucun indice → message d'état contextuel
+    (`RefreshCombosList`) selon qu'aucune combo n'existe encore ou que le
+    filtre d'arme actif n'en a aucune.
+  - Bouton "Importer les 5 combos de cette arme" cliquable même sans arme
+    choisie (menait à une MessageBox d'erreur après coup) → grisé tant que
+    le filtre est sur "Toutes les armes".
+  - Raccourcis clavier visibles seulement dans le 5ᵉ onglet "À propos" → même
+    liste (avec l'exemple ci-dessus) désormais montrée d'office au premier
+    lancement.
+  - Éditeur de combo manuel (texte libre, noms d'action exacts requis) sans
+    aucun exemple avant l'erreur de sauvegarde → ligne d'aide affichant un
+    exemple concret et la liste des noms d'action valides, au-dessus des
+    étapes.
+  - Cluster ZQSD n'affichant que la lettre de la touche (pas de légende,
+    illisible pour qui ne connaît pas la convention AZERTY) → nom de l'action
+    ajouté en petit sous la lettre pour ce groupe, + tooltip sur tous les
+    boutons.
+  - Hook clavier/manette global constaté en train de réagir à des frappes
+    faites dans d'autres fenêtres (navigateur, éditeur) pendant le test,
+    faisant avancer silencieusement l'historique et la combo du mode
+    Tutoriel hors de tout contexte de jeu → `AppState.CaptureSuspended` +
+    raccourci `Ctrl+Alt+H` + entrée dans le menu du tray + bouton dans
+    l'onglet Général, pour couper le suivi (touches, historique,
+    `ComboRunner.Feed`) sans fermer l'app ; un bandeau rouge persistant sur
+    l'overlay rappelle que la capture est suspendue tant qu'elle l'est.
+- Correctif Faux (récidive du problème "Version 9") : l'utilisateur a de
+  nouveau signalé des combos fausses, cette fois sur la Faux (le vrai combo
+  de base est nLight > Jump > sAir > sSig, pas ce qui était codé). En
+  récupérant réellement la page bluestacks.com citée comme source pour la
+  Faux, son contenu actuel ("nAir>sAir", "sAir>sLight", "Rec>nAir",
+  "Rec>sLight") ne correspondait à AUCUN des 5 combos codés malgré la
+  citation — la correction de la Version 9 avait donc encore fabriqué la
+  citation sans vérifier qu'elle correspondait vraiment à la source. Refait
+  avec une page effectivement récupérée (theglobalgaming.com, "Scythe guide:
+  combo strings") pour 4 des 5 combos, plus le combo de base tel que confirmé
+  par l'utilisateur en jeu (marqué comme tel dans sa `Description`, sans lui
+  inventer une fausse source écrite). Le `combos.json` réel de l'utilisateur
+  a aussi été corrigé en direct (stats remises à 0, comme le ferait un vrai
+  réimport). **Les 14 autres armes de `WeaponComboPresets.cs` n'ont pas été
+  revérifiées** — vu que la Faux avait une citation fabriquée malgré la
+  Version 9, il est probable qu'au moins certaines des autres armes aient le
+  même problème ; à auditer arme par arme (fetch réel de la source citée,
+  comparaison littérale) si l'utilisateur signale d'autres combos fausses ou
+  demande un audit complet.
 
 ## Pistes évoquées mais pas demandées/faites
 

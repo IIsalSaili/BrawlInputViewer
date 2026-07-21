@@ -21,15 +21,26 @@ public enum ComboFailReason
 }
 
 /// <summary>
-/// Pure validation logic for a Combo: fed one "coup joué" (a set of KeyBind
-/// pressed together, already merged/deduplicated by the caller) at a time,
-/// tracks progress through the combo's steps, and resets on a wrong input.
-/// Timing (MinDelayMs/MaxDelayMs, Combo.DefaultToleranceMs) is intentionally
-/// NOT enforced as a fail condition — the real game never demands frame-perfect
-/// rhythm to land a combo, only the right buttons in the right order. Those
-/// fields still drive the overlay's tolerance progress bar as a pacing guide,
-/// they just never cause a reset on their own. No UI, no keyboard hook —
-/// testable independently.
+/// Pure validation logic for a Combo: fed one "coup joué" (the set of KeyBind
+/// actions *currently held*, recomputed by the caller on every key change) at
+/// a time, tracks progress through the combo's steps, and resets on a wrong
+/// input. Aucune notion de timing nulle part dans ce moteur :
+///
+/// - Timing (MinDelayMs/MaxDelayMs, Combo.DefaultToleranceMs) n'est jamais une
+///   condition d'échec — le vrai jeu n'exige aucun rythme précis pour qu'une
+///   combo touche. Ces champs ne servent qu'à la barre de tolérance visuelle.
+/// - Les touches de direction (Group == "Movement") tenues en plus de ce qui
+///   est demandé ne cassent jamais une étape : un joueur réel garde souvent
+///   une direction enfoncée en enchaînant (ex. tenir Droite en sautant), ce
+///   n'est pas une faute. Seules les touches d'action (Group == "Action")
+///   comptent pour juger si une étape est correcte.
+/// - Un mash/double-clic du bouton qui vient tout juste de valider l'étape
+///   précédente (ex. cliquer Saut 3 fois pour caler son timing) est ignoré au
+///   lieu de casser l'étape suivante — on ne compare plus "exactement", on ne
+///   fail que sur un bouton d'action réellement différent de ce qui est
+///   attendu et de ce qui vient d'être validé.
+///
+/// No UI, no keyboard hook — testable independently.
 /// </summary>
 public sealed class ComboRunner
 {
@@ -44,19 +55,16 @@ public sealed class ComboRunner
     public event Action<int, ComboFailReason>? StepFailed;
     public event Action? ComboCompleted;
     public event Action? ComboReset;
+    public event Action? ComboAbandoned;
 
-    private DateTime _lastAttackTime = DateTime.MinValue;
+    /// <summary>Dernier instant où Feed a été appelé — sert uniquement à
+    /// CheckAbandon (voir plus bas), pas à juger une étape.</summary>
+    private DateTime _lastFeedUtc = DateTime.MinValue;
 
-    /// <summary>Actions considérées comme des "attaques" pour la tolérance de récupération
-    /// ci-dessous (pas Saut/Esquive/Lancer/Taunt : en jeu, seule une attaque bloque le
-    /// personnage dans une animation qui empêche d'en relancer une autre au même moment).</summary>
-    private static readonly HashSet<string> AttackActions = new() { "Att. légère", "Att. forte" };
-
-    /// <summary>Fenêtre (ms) après une attaque pendant laquelle un bouton d'attaque différent de
-    /// celui attendu est ignoré plutôt que de casser la combo : en jeu, le personnage est encore
-    /// en animation de récupération et cet input est de toute façon avalé par le moteur, ce n'est
-    /// donc pas une vraie faute de timing du joueur.</summary>
-    private const int AttackRecoveryLockMs = 180;
+    /// <summary>Ensemble d'actions (hors mouvement) validé par la dernière étape réussie.
+    /// Sert uniquement à tolérer un mash/répétition du même bouton juste après (voir
+    /// docstring de classe) — pas une histoire de délai, juste un état mémorisé.</summary>
+    private HashSet<string> _lastConsumedActionKeys = new();
 
     /// <summary>If true, a failed combo keeps its Streak instead of resetting to 0.</summary>
     public bool KeepStreakOnFail { get; set; }
@@ -72,13 +80,24 @@ public sealed class ComboRunner
         if (Combo.Steps.Count == 0) return;
 
         var step = Combo.Steps[CurrentStepIndex];
-        var pressedActions = new HashSet<string>(pressedBindsThisTick.Select(b => b.Action));
         var required = new HashSet<string>(step.RequiredActions);
-        var pressedIsAttack = pressedActions.Overlaps(AttackActions);
 
-        if (pressedActions.SetEquals(required))
+        // On ne juge une étape que sur ses boutons d'action (Group == "Action") :
+        // les directions tenues en plus (Group == "Movement") ne comptent jamais
+        // contre le joueur, tenir une direction en enchaînant est normal.
+        var pressedMovement = new HashSet<string>(pressedBindsThisTick
+            .Where(b => b.Group == "Movement").Select(b => b.Action));
+        var pressedAction = new HashSet<string>(pressedBindsThisTick
+            .Where(b => b.Group != "Movement").Select(b => b.Action));
+        var requiredMovementNames = new HashSet<string>(required.Where(a =>
+            pressedBindsThisTick.Any(b => b.Action == a && b.Group == "Movement") || IsKnownMovement(a)));
+        var requiredAction = new HashSet<string>(required.Except(requiredMovementNames));
+
+        bool movementOk = requiredMovementNames.IsSubsetOf(pressedMovement);
+
+        if (movementOk && pressedAction.SetEquals(requiredAction))
         {
-            if (pressedIsAttack) _lastAttackTime = timestamp;
+            _lastConsumedActionKeys = requiredAction;
             State = ComboRunState.InProgress;
             StepSucceeded?.Invoke(CurrentStepIndex);
             CurrentStepIndex++;
@@ -95,27 +114,39 @@ public sealed class ComboRunner
             return;
         }
 
-        // Mode tolérant : un input hors combo composé uniquement de mouvement pur
-        // (pas d'action) est ignoré plutôt que de casser la série en cours.
-        if (Combo.MatchMode == MatchMode.IgnoreExtraneous &&
-            pressedBindsThisTick.Count > 0 &&
-            pressedBindsThisTick.All(b => b.Group == "Movement"))
+        // Boutons d'action pressés qui ne font pas partie de ce qui est attendu ici.
+        var wrongActions = new HashSet<string>(pressedAction);
+        wrongActions.ExceptWith(requiredAction);
+
+        // Rien d'inattendu : soit on est encore en train de construire l'étape (une
+        // partie seulement des boutons requis est enfoncée, ou la direction requise
+        // manque encore), soit c'est du mouvement pur — jamais un échec.
+        if (wrongActions.Count == 0)
         {
             return;
         }
 
-        // Tolérance de récupération : un mauvais bouton d'attaque pressé juste après une
-        // attaque (bonne ou mauvaise) est ignoré plutôt que de casser la combo — voir
-        // AttackRecoveryLockMs ci-dessus. Ne s'applique pas au tout premier input d'une
-        // tentative (rien à "récupérer" avant la toute première attaque).
-        if (pressedIsAttack && _lastAttackTime != DateTime.MinValue &&
-            (timestamp - _lastAttackTime).TotalMilliseconds < AttackRecoveryLockMs)
+        // Le bouton de la toute première étape qui revient pendant une tentative en cours
+        // doit TOUJOURS faire échouer la combo, même s'il correspond à la tolérance de
+        // mash ci-dessous : sans ça, marteler l'ensemble de ses touches en boucle finit
+        // par "valider" une combo par hasard (chaque bonne touche apparaît tôt ou tard
+        // dans la boucle, et le retour périodique de la 1ère touche était toléré comme du
+        // mash au lieu de reset). Ne s'applique qu'à partir de la 2ème étape : à l'étape 0,
+        // c'est justement l'input attendu.
+        var firstStep = Combo.Steps[0];
+        var firstRequired = new HashSet<string>(firstStep.RequiredActions);
+        var firstRequiredMovementNames = new HashSet<string>(firstRequired.Where(a =>
+            pressedBindsThisTick.Any(b => b.Action == a && b.Group == "Movement") || IsKnownMovement(a)));
+        var firstRequiredAction = new HashSet<string>(firstRequired.Except(firstRequiredMovementNames));
+        bool firstStepInputRecurring = CurrentStepIndex != 0 && wrongActions.SetEquals(firstRequiredAction);
+
+        // Mash/répétition du bouton qui vient de valider l'étape précédente (ex. cliquer
+        // Saut 3 fois pour caler son timing) : on l'ignore au lieu de casser la suite,
+        // ce n'est pas un vrai mauvais input, juste un joueur qui n'est pas une machine.
+        if (!firstStepInputRecurring && wrongActions.SetEquals(_lastConsumedActionKeys))
         {
-            _lastAttackTime = timestamp;
             return;
         }
-
-        if (pressedIsAttack) _lastAttackTime = timestamp;
 
         // Tant qu'aucune étape n'a encore été validée (CurrentStepIndex == 0), il
         // n'y a aucune progression à perdre : un input qui ne correspond pas au
@@ -128,13 +159,22 @@ public sealed class ComboRunner
         if (!KeepStreakOnFail) Streak = 0;
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
+        _lastConsumedActionKeys = new HashSet<string>();
         ComboReset?.Invoke();
     }
+
+    /// <summary>Combos enregistrées ou importées peuvent contenir un nom d'action de
+    /// direction sans qu'un bind "Movement" ne soit dans le tick courant pour le confirmer
+    /// (ex. étape suivante où la direction n'est déjà plus tenue) — on retombe sur les noms
+    /// de direction standards de l'app pour ne pas mal classer ces actions comme "Action".</summary>
+    private static bool IsKnownMovement(string action) =>
+        action is "Gauche" or "Droite" or "Haut" or "Bas";
 
     /// <summary>Manual reset (e.g. switching the active combo), no events fired.</summary>
     public void Reset()
     {
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
+        _lastConsumedActionKeys = new HashSet<string>();
     }
 }

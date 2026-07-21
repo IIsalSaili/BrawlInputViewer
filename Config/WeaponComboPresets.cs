@@ -150,16 +150,22 @@ public static class WeaponComboPresets
         },
         ["Faux"] = new[]
         {
-            new ComboDef("SAir vers SLight", "sAir > sLight (source : bluestacks.com / gamespecifications.com).",
-                new[] { S("Saut"), S("Droite", "Att. légère"), S("Droite", "Att. légère") }),
-            new ComboDef("SLight vers NLight", "sLight > nLight (source : gamespecifications.com).",
-                new[] { S("Droite", "Att. légère"), S("Att. légère") }),
-            new ComboDef("DLight vers SLight", "dLight > sLight (source : gamespecifications.com).",
-                new[] { S("Bas", "Att. légère"), S("Droite", "Att. légère") }),
-            new ComboDef("DLight vers SAir", "dLight > sAir (source : gamespecifications.com).",
-                new[] { S("Bas", "Att. légère"), S("Saut"), S("Droite", "Att. légère") }),
-            new ComboDef("DLight vers NLight", "dLight > nLight (source : gamespecifications.com).",
-                new[] { S("Bas", "Att. légère"), S("Att. légère") }),
+            // La version précédente de ce bloc citait bluestacks.com/gamespecifications.com
+            // pour des combos qui n'y figurent pas réellement (vérifié en récupérant la page :
+            // le vrai contenu bluestacks pour la Faux est "nAir>sAir", "sAir>sLight",
+            // "Rec>nAir", "Rec>sLight" — aucun rapport avec ce qui était codé). Refait à partir
+            // d'une page effectivement récupérée (theglobalgaming.com) + de la correction de
+            // l'utilisateur pour le combo de base, qui prime sur toute source secondaire.
+            new ComboDef("NLight vers Saut vers SAir vers SSig (combo de base)", "nLight > Jump > sAir > sSig — combo de base signalé par l'utilisateur comme confirmé en jeu (prime sur les sources écrites ci-dessous).",
+                new[] { S("Att. légère"), S("Saut"), S("Droite", "Att. légère"), S("Droite", "Att. forte") }),
+            new ComboDef("NLight vers NAir", "nLight > nAir (source : theglobalgaming.com, \"Scythe guide: combo strings\").",
+                new[] { S("Att. légère"), S("Saut"), S("Att. légère") }),
+            new ComboDef("SLight vers DLight", "sLight > dLight (source : theglobalgaming.com, \"Scythe guide: combo strings\").",
+                new[] { S("Droite", "Att. légère"), S("Bas", "Att. légère") }),
+            new ComboDef("NLight, NAir, SAir, Gravity Cancel, DLight", "nLight > nAir > sAir > GC > dLight (source : theglobalgaming.com, \"Scythe guide: combo strings\") — GC = un appui Saut supplémentaire pour se re-stabiliser avant le DLight au sol.",
+                new[] { S("Att. légère"), S("Saut"), S("Att. légère"), S("Droite", "Att. légère"), S("Saut"), S("Bas", "Att. légère") }),
+            new ComboDef("DLight, SLight, NLight, Saut, NAir, Récupération", "dLight > sLight > nLight > Jump > nAir > Rec (source : theglobalgaming.com, \"Scythe guide: combo strings\").",
+                new[] { S("Bas", "Att. légère"), S("Droite", "Att. légère"), S("Att. légère"), S("Saut"), S("Att. légère"), S("Haut", "Att. forte") }),
         },
         ["Épée à deux mains"] = new[]
         {

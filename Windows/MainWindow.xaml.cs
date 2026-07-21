@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private const int VK_K = 0x4B;
     private const int VK_U = 0x55;
     private const int VK_I = 0x49;
+    private const int VK_H = 0x48;
 
     private static bool IsCtrl(int vkCode) => vkCode is VK_CONTROL or VK_LCONTROL or VK_RCONTROL;
     private static bool IsAlt(int vkCode) => vkCode is VK_MENU or VK_LMENU or VK_RMENU;
@@ -109,6 +110,7 @@ public partial class MainWindow : Window
     private ComboRunner? _comboRunner;
     private StackPanel _comboStepsPanel = null!;
     private TextBlock _comboNameText = null!;
+    private TextBlock _comboDamageNoteText = null!;
     private TextBlock _comboStreakText = null!;
     private ContentControl _historySlotMode1 = null!;
     private ContentControl _historySlotMode3 = null!;
@@ -128,6 +130,7 @@ public partial class MainWindow : Window
     // --- Badge de changement de mode (auto-fade) ---
     private TextBlock _modeBadge = null!;
     private DispatcherTimer? _modeBadgeTimer;
+    private TextBlock _suspendedBadge = null!;
 
     // --- Icône dans la zone de notification (tray) ---
     private System.Windows.Forms.NotifyIcon? _trayIcon;
@@ -187,7 +190,7 @@ public partial class MainWindow : Window
 
         _hintText = new TextBlock
         {
-            Text = "Ctrl+Alt+O : verrouiller/déverrouiller · Ctrl+Alt+P : changer de mode · Ctrl+Alt+K : changer de combo · Ctrl+Alt+R : enregistrer une combo · Ctrl+Alt+U : panneau de contrôle · Ctrl+Alt+I : révéler la combo (mode révision) · glisser pour déplacer (mode 1)",
+            Text = "Ctrl+Alt+O : verrouiller/déverrouiller · Ctrl+Alt+P : changer de mode · Ctrl+Alt+K : changer de combo · Ctrl+Alt+R : enregistrer une combo · Ctrl+Alt+U : panneau de contrôle · Ctrl+Alt+I : révéler la combo (mode révision) · Ctrl+Alt+H : suspendre/reprendre la capture · glisser pour déplacer (mode 1)",
             Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
             FontSize = 11,
             Background = new SolidColorBrush(Color.FromArgb(0x99, 0x00, 0x00, 0x00)),
@@ -228,6 +231,20 @@ public partial class MainWindow : Window
         };
         Canvas.SetTop(_modeBadge, 10);
         RootCanvas.Children.Add(_modeBadge);
+
+        _suspendedBadge = new TextBlock
+        {
+            Text = "⏸ Capture suspendue (Ctrl+Alt+H pour reprendre)",
+            Foreground = Brushes.White,
+            FontSize = 12,
+            FontWeight = FontWeights.Bold,
+            Background = new SolidColorBrush(Color.FromArgb(0xCC, 0x8A, 0x2B, 0x2B)),
+            Padding = new Thickness(8, 4, 8, 4),
+            Opacity = 0,
+        };
+        Canvas.SetTop(_suspendedBadge, 40);
+        RootCanvas.Children.Add(_suspendedBadge);
+        AppState.CaptureSuspendedChanged += OnCaptureSuspendedChanged;
 
         ApplyScale();
         SetActiveComboRunner();
@@ -346,6 +363,45 @@ public partial class MainWindow : Window
         var brush = new SolidColorBrush(color) { Opacity = 0.25 };
         RegisterBrush(bind, brush);
 
+        // Le cluster ZQSD n'affiche que la lettre physique de la touche — sans
+        // légende, rien n'indique que ce sont des directions (surtout pour qui
+        // ne connaît pas la convention clavier AZERTY). On ajoute donc le nom
+        // de l'action en petit sous la lettre pour ce groupe, plus un tooltip
+        // sur tous les boutons pour la touche complète associée.
+        UIElement content = bind.Group == "Movement"
+            ? new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = bind.Label,
+                        FontSize = fontSize,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.White,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                    new TextBlock
+                    {
+                        Text = bind.Action,
+                        FontSize = fontSize * 0.45,
+                        Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                },
+            }
+            : new TextBlock
+            {
+                Text = bind.Label,
+                FontSize = fontSize,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
         return new Border
         {
             Background = brush,
@@ -355,15 +411,8 @@ public partial class MainWindow : Window
             Margin = new Thickness(3),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
-            Child = new TextBlock
-            {
-                Text = bind.Label,
-                FontSize = fontSize,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
+            ToolTip = $"{bind.Action} ({string.Join(" / ", bind.Keys)})",
+            Child = content,
         };
     }
 
@@ -397,21 +446,31 @@ public partial class MainWindow : Window
             Margin = new Thickness(0, 8, 0, 0),
         };
 
+        // Affiche le rappel "true combo jusqu'à X%" saisi dans l'éditeur (Combo.DamageNote),
+        // quand renseigné — sinon masqué, absence de note ≠ "marche à tout %".
+        _comboDamageNoteText = new TextBlock
+        {
+            FontSize = 13,
+            Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xC1, 0x4D)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+            Visibility = Visibility.Collapsed,
+        };
+
         _comboStepsPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
 
+        // L'historique de coups n'est plus affiché en mode Tutoriel : les pastilles de
+        // combo suffisent à suivre la progression, et l'historique en dessous ajoutait
+        // du bruit visuel jugé gênant par l'utilisateur. _historySlotMode3 reste un champ
+        // non nul mais n'est jamais ajouté à l'arbre visuel ni alimenté (voir ApplyModeVisuals).
         _historySlotMode3 = new ContentControl();
 
         var content = new StackPanel { Orientation = Orientation.Vertical };
         content.Children.Add(_comboNameText);
+        content.Children.Add(_comboDamageNoteText);
         content.Children.Add(_comboStepsPanel);
         content.Children.Add(_comboStreakText);
-        content.Children.Add(new Border
-        {
-            Height = 1,
-            Margin = new Thickness(0, 12, 0, 12),
-            Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
-        });
-        content.Children.Add(_historySlotMode3);
 
         var panel = new Border
         {
@@ -449,6 +508,7 @@ public partial class MainWindow : Window
         {
             _comboNameText.Text = "Aucune combo — crée-en une (Ctrl+Alt+R ou le panneau de contrôle)";
             _comboStreakText.Text = "";
+            _comboDamageNoteText.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -457,6 +517,16 @@ public partial class MainWindow : Window
         var weaponTag = string.IsNullOrEmpty(combo.Weapon) ? "" : $"[{combo.Weapon}] ";
         _comboNameText.Text = $"{weaponTag}{combo.Name}  ({filteredPos + 1}/{filteredCount} · Ctrl+Alt+K pour changer)";
         _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
+
+        if (string.IsNullOrEmpty(combo.DamageNote))
+        {
+            _comboDamageNoteText.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            _comboDamageNoteText.Text = $"⚠ {combo.DamageNote}";
+            _comboDamageNoteText.Visibility = Visibility.Visible;
+        }
 
         for (int i = 0; i < combo.Steps.Count; i++)
         {
@@ -1032,6 +1102,27 @@ public partial class MainWindow : Window
         }
 
         ApplyOpacity();
+        ShowFirstRunHintIfNeeded();
+    }
+
+    /// <summary>Tout premier lancement (settings.json absent avant chargement) :
+    /// affiche temporairement le bandeau de raccourcis (normalement réservé au
+    /// mode déverrouillé) pour que l'utilisateur découvre qu'un panneau de
+    /// contrôle existe, sans avoir à deviner Ctrl+Alt+O au préalable.</summary>
+    private void ShowFirstRunHintIfNeeded()
+    {
+        if (!OverlaySettingsConfig.WasFirstRun) return;
+
+        _hintText.Visibility = Visibility.Visible;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(12) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            // Ne masque que si toujours verrouillé : si l'utilisateur a lui-même
+            // déverrouillé entre-temps, on ne casse pas ce qu'il a déclenché.
+            if (AppState.Locked) _hintText.Visibility = Visibility.Collapsed;
+        };
+        timer.Start();
     }
 
     private void BuildTrayIcon()
@@ -1045,6 +1136,11 @@ public partial class MainWindow : Window
         var modeItem = new System.Windows.Forms.ToolStripMenuItem("Changer de mode");
         modeItem.Click += (_, _) => Dispatcher.Invoke(AppState.CycleMode);
         menu.Items.Add(modeItem);
+
+        var suspendItem = new System.Windows.Forms.ToolStripMenuItem("Suspendre la capture (Ctrl+Alt+H)") { CheckOnClick = true };
+        suspendItem.Click += (_, _) => Dispatcher.Invoke(AppState.ToggleCaptureSuspended);
+        AppState.CaptureSuspendedChanged += suspended => suspendItem.Checked = suspended;
+        menu.Items.Add(suspendItem);
 
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
@@ -1060,11 +1156,18 @@ public partial class MainWindow : Window
 
         _trayIcon = new System.Windows.Forms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = CreateTrayIcon(),
             Text = "Brawlhalla Input Overlay",
             Visible = true,
             ContextMenuStrip = menu,
         };
+        if (OverlaySettingsConfig.WasFirstRun)
+        {
+            // Un premier lancement sans historique/combo n'a aucun autre moyen de
+            // découvrir que l'app tourne ici et que c'est la porte d'entrée vers le
+            // panneau de contrôle (voir aussi le badge d'accueil affiché sur l'overlay).
+            _trayIcon.ShowBalloonTip(6000, "Brawlhalla Input Overlay", "L'overlay tourne ici. Clic gauche sur cette icône (ou Ctrl+Alt+U) ouvre le panneau de contrôle.", System.Windows.Forms.ToolTipIcon.Info);
+        }
         _trayIcon.MouseClick += (_, args) =>
         {
             if (args.Button == System.Windows.Forms.MouseButtons.Left)
@@ -1072,6 +1175,32 @@ public partial class MainWindow : Window
                 Dispatcher.Invoke(OpenControlPanel);
             }
         };
+    }
+
+    /// <summary>Dessine une icône distincte au runtime plutôt que d'utiliser
+    /// SystemIcons.Application (icône Windows générique, indiscernable des
+    /// dizaines d'autres icônes système dans la zone de notification — un
+    /// premier utilisateur ne pouvait pas la repérer visuellement).</summary>
+    private static System.Drawing.Icon CreateTrayIcon()
+    {
+        const int size = 32;
+        using var bmp = new System.Drawing.Bitmap(size, size);
+        using (var g = System.Drawing.Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(System.Drawing.Color.Transparent);
+            using var bg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 0x2A, 0x2A, 0x2A));
+            g.FillEllipse(bg, 0, 0, size, size);
+            using var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(255, 0xE8, 0xC4, 0x4A), 2f);
+            g.DrawEllipse(pen, 1, 1, size - 2, size - 2);
+            using var font = new System.Drawing.Font("Segoe UI", 15, System.Drawing.FontStyle.Bold);
+            using var textBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 0xE8, 0xC4, 0x4A));
+            var format = new System.Drawing.StringFormat { Alignment = System.Drawing.StringAlignment.Center, LineAlignment = System.Drawing.StringAlignment.Center };
+            g.DrawString("B", font, textBrush, new System.Drawing.RectangleF(0, -1, size, size), format);
+        }
+
+        var hIcon = bmp.GetHicon();
+        return System.Drawing.Icon.FromHandle(hIcon);
     }
 
     private void OpenControlPanel()
@@ -1187,6 +1316,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_ctrlDown && _altDown && vkCode == VK_H)
+        {
+            Dispatcher.Invoke(AppState.ToggleCaptureSuspended);
+            return;
+        }
+
+        // Suspendu : on garde le suivi Ctrl/Alt et les raccourcis ci-dessus actifs
+        // (pour pouvoir se réactiver), mais on n'allume plus les touches, n'ajoute
+        // plus à l'historique et ne nourrit plus le ComboRunner — sinon n'importe
+        // quelle frappe faite ailleurs sur le PC (hors jeu) continue de faire
+        // avancer/rater silencieusement la combo en cours (voir AppState.CaptureSuspended).
+        if (AppState.CaptureSuspended) return;
+
         if (_brushesByVk.TryGetValue(vkCode, out var brushes))
         {
             Dispatcher.Invoke(() =>
@@ -1211,13 +1353,16 @@ public partial class MainWindow : Window
         }
     }
 
-    // Ne loggue pas immédiatement : attend ComboWindow pour voir si une autre touche
-    // est pressée quasi en même temps, afin de les regrouper en un seul "coup joué"
-    // ("A + B"). Recalcule à chaque nouvel appui l'ensemble des touches *actuellement*
-    // enfoncées (pas seulement celles pressées pendant la fenêtre) : une direction déjà
-    // tenue avant que l'attaque soit pressée doit quand même compter comme tenue au
-    // moment du coup — sinon "se placer puis attaquer" ne matcherait jamais une étape
-    // combinée du mode Tutoriel.
+    // Recalcule à chaque nouvel appui l'ensemble des touches *actuellement* enfoncées
+    // (pas seulement celles pressées pendant la fenêtre) : une direction déjà tenue
+    // avant que l'attaque soit pressée doit quand même compter comme tenue au moment
+    // du coup — sinon "se placer puis attaquer" ne matcherait jamais une étape combinée
+    // du mode Tutoriel. Le ComboRunner est nourri ICI, tout de suite, à chaque appui :
+    // aucun délai d'attente n'est introduit avant de juger un coup (voir ComboRunner
+    // pour le détail de la tolérance mouvement/mash qui remplace l'ancien système de
+    // fenêtre de regroupement, qui rendait certaines combos injouables). Seul
+    // l'affichage dans l'historique (regroupement visuel "A + B", voir FlushPendingBinds)
+    // attend encore un court instant, sans impact sur la validation de la combo.
     private void QueuePendingBind(KeyBind bind)
     {
         _pendingBinds.Clear();
@@ -1228,6 +1373,8 @@ public partial class MainWindow : Window
                 _pendingBinds.Add(heldBind);
             }
         }
+
+        _comboRunner?.Feed(new List<KeyBind>(_pendingBinds), DateTime.UtcNow);
 
         _comboTimer?.Stop();
         _comboTimer?.Start();
@@ -1251,6 +1398,8 @@ public partial class MainWindow : Window
 
         _pressedVks.Remove(vkCode);
 
+        if (AppState.CaptureSuspended) return;
+
         if (_brushesByVk.TryGetValue(vkCode, out var brushes))
         {
             Dispatcher.Invoke(() =>
@@ -1272,7 +1421,6 @@ public partial class MainWindow : Window
     {
         var now = DateTime.UtcNow;
 
-        _comboRunner?.Feed(binds, now);
         if (AppState.Recording) _recordedMoves.Add((binds, now));
         AppState.LogSessionMove(HistoryText(binds));
 
@@ -1428,10 +1576,10 @@ public partial class MainWindow : Window
         _mode2Layer.Visibility = mode == 1 ? Visibility.Visible : Visibility.Collapsed;
         _mode3Panel.Visibility = mode == 2 ? Visibility.Visible : Visibility.Collapsed;
 
-        // L'historique est un seul StackPanel partagé entre le mode 1 et le mode 3 :
-        // on le déplace vers le conteneur du mode actif plutôt que d'en dupliquer l'état.
+        // L'historique n'est affiché qu'en mode Historique (mode 1) : en mode Tutoriel
+        // (mode 3), il ajoutait du bruit visuel jugé gênant en jeu par l'utilisateur —
+        // les pastilles de combo suffisent à suivre la progression.
         _historySlotMode1.Content = mode == 0 ? _historyPanel : null;
-        _historySlotMode3.Content = mode == 2 ? _historyPanel : null;
 
         if (mode == 2)
         {
@@ -1448,6 +1596,16 @@ public partial class MainWindow : Window
     }
 
     private void OnModeChanged(int mode) => Dispatcher.Invoke(() => ApplyModeVisuals(mode, showBadge: true));
+
+    /// <summary>Sans indicateur permanent, un utilisateur qui active la
+    /// suspension (ou la retrouve active à la relance) ne comprend pas pourquoi
+    /// plus rien ne s'allume/s'enregistre — contrairement au badge de mode
+    /// (1.5s), celui-ci reste affiché tant que la capture est suspendue.</summary>
+    private void OnCaptureSuspendedChanged(bool suspended) => Dispatcher.Invoke(() =>
+    {
+        _suspendedBadge.Opacity = suspended ? 1.0 : 0.0;
+        Canvas.SetLeft(_suspendedBadge, (_canvasWidth - _suspendedBadge.ActualWidth) / 2);
+    });
 
     private void ShowModeBadge(string text)
     {

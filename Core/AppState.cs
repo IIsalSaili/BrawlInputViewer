@@ -37,6 +37,15 @@ public static class AppState
     public static int ActiveComboIndex { get; private set; } = _combos.Count > 0 ? 0 : -1;
     public static bool Recording { get; private set; }
 
+    // Le hook clavier/manette est global par nature (il doit capter les touches
+    // même quand Brawlhalla a le focus) : hors du jeu, ça veut dire que
+    // l'historique et le suivi de combo réagissent à n'importe quelle frappe
+    // faite dans d'autres fenêtres (navigateur, éditeur de code...), ce qui
+    // n'est pas évident pour un utilisateur qui laisse juste l'app tourner en
+    // faisant autre chose. Cette bascule (tray + panneau + Ctrl+Alt+H) coupe le
+    // suivi sans fermer l'app ni perdre la config.
+    public static bool CaptureSuspended { get; private set; }
+
     // Stats de précision par action (mode Tutoriel), persistées entre sessions.
     private static readonly Dictionary<string, ActionStat> _stats = BuildStatsIndex(StatsConfig.LoadOrEmpty());
     public static IReadOnlyCollection<ActionStat> Stats => _stats.Values;
@@ -53,6 +62,16 @@ public static class AppState
     public static event Action<bool>? LockChanged;
     public static event Action<int>? ActiveComboChanged;
     public static event Action<bool>? RecordingChanged;
+    public static event Action<bool>? CaptureSuspendedChanged;
+
+    public static void SetCaptureSuspended(bool suspended)
+    {
+        if (CaptureSuspended == suspended) return;
+        CaptureSuspended = suspended;
+        CaptureSuspendedChanged?.Invoke(suspended);
+    }
+
+    public static void ToggleCaptureSuspended() => SetCaptureSuspended(!CaptureSuspended);
 
     /// <summary>Demande à l'overlay de révéler temporairement la combo en mode révision
     /// (déclenché depuis le panneau de contrôle, en plus du raccourci Ctrl+Alt+I).</summary>

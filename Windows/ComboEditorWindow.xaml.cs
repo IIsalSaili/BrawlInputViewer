@@ -23,6 +23,7 @@ public partial class ComboEditorWindow : Window
     private TextBox _descriptionBox = null!;
     private TextBox _toleranceBox = null!;
     private ComboBox _matchModeCombo = null!;
+    private TextBox _damageNoteBox = null!;
 
     public Combo? Result { get; private set; }
 
@@ -63,7 +64,33 @@ public partial class ComboEditorWindow : Window
         toleranceRow.Children.Add(_matchModeCombo);
         root.Children.Add(toleranceRow);
 
+        root.Children.Add(FieldLabel("Limite de % de dégâts (optionnel, ex. \"true combo jusqu'à ~40%\")"));
+        _damageNoteBox = new TextBox { Text = _existing?.DamageNote ?? "", Margin = new Thickness(0, 0, 0, 2) };
+        root.Children.Add(_damageNoteBox);
+        root.Children.Add(new TextBlock
+        {
+            Text = "Le knockback augmente avec les dégâts déjà subis par l'adversaire : certaines combos ne connectent que jusqu'à un certain %. Laisse vide si tu ne sais pas — mieux vaut vide que faux.",
+            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+
         root.Children.Add(new TextBlock { Text = "Étapes (actions séparées par « + », dans l'ordre)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 8, 0, 6) });
+
+        // Le nom d'action doit être tapé exactement (accents compris) pour être
+        // reconnu — sans ça, l'erreur "action inconnue" n'apparaît qu'après coup,
+        // au clic sur Enregistrer. On rappelle donc ici le format ET la liste des
+        // noms valides, tirée en direct des touches actuellement configurées.
+        var validNames = string.Join(", ", AppState.Binds.Select(b => b.Action).OrderBy(a => a));
+        root.Children.Add(new TextBlock
+        {
+            Text = $"Exemple : Droite + Att. légère    ·    Actions valides : {validNames}",
+            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
 
         var scroller = new ScrollViewer { Content = _stepsPanel, MaxHeight = 240, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         root.Children.Add(scroller);
@@ -188,9 +215,15 @@ public partial class ComboEditorWindow : Window
             Id = _existing?.Id ?? Guid.NewGuid().ToString("N"),
             Name = string.IsNullOrWhiteSpace(_nameBox.Text) ? "Combo" : _nameBox.Text.Trim(),
             Description = _descriptionBox.Text.Trim(),
+            Weapon = _existing?.Weapon ?? "",
             Steps = steps,
             DefaultToleranceMs = tolerance,
             MatchMode = _matchModeCombo.SelectedIndex == 1 ? MatchMode.IgnoreExtraneous : MatchMode.Strict,
+            DamageNote = _damageNoteBox.Text.Trim(),
+            BestStreak = _existing?.BestStreak ?? 0,
+            TotalCompletions = _existing?.TotalCompletions ?? 0,
+            TotalAttempts = _existing?.TotalAttempts ?? 0,
+            Mastered = _existing?.Mastered ?? false,
         };
 
         DialogResult = true;

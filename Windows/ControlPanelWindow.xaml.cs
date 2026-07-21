@@ -180,6 +180,13 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(resetPosBtn);
         panel.Children.Add(HelpText("Utile après avoir glissé l'overlay ailleurs à l'écran."));
 
+        var suspendBtn = new Button { Content = SuspendLabel(), Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) };
+        suspendBtn.Click += (_, _) => AppState.ToggleCaptureSuspended();
+        void SuspendHandler(bool _) => Dispatcher.Invoke(() => suspendBtn.Content = SuspendLabel());
+        AppState.CaptureSuspendedChanged += SuspendHandler;
+        panel.Children.Add(suspendBtn);
+        panel.Children.Add(HelpText("Le suivi clavier/manette capte les touches partout sur le PC, même hors jeu (nécessaire pour fonctionner par-dessus Brawlhalla). Suspends la capture quand tu utilises juste ton PC normalement, sans quoi l'historique et la combo en cours du mode Tutoriel réagissent à ce que tu tapes ailleurs. Raccourci rapide : Ctrl+Alt+H."));
+
         var startupCheck = new CheckBox
         {
             Content = "Lancer automatiquement au démarrage de Windows",
@@ -317,6 +324,8 @@ public partial class ControlPanelWindow : Window
         sessionRow.Children.Add(exportSessionBtn);
         panel.Children.Add(sessionRow);
 
+        _unsubscribeCurrentTab = () => AppState.CaptureSuspendedChanged -= SuspendHandler;
+
         return Wrap(panel);
     }
 
@@ -357,6 +366,7 @@ public partial class ControlPanelWindow : Window
     }
 
     private static string LockLabel() => AppState.Locked ? "Déverrouiller l'overlay" : "Verrouiller l'overlay";
+    private static string SuspendLabel() => AppState.CaptureSuspended ? "Reprendre la capture" : "Suspendre la capture (hors du jeu)";
 
     // ================= Touches =================
 
@@ -555,23 +565,26 @@ public partial class ControlPanelWindow : Window
         _weaponFilterCombo.SelectedItem = string.IsNullOrEmpty(AppState.Settings.TrainingWeaponFilter)
             ? "Toutes les armes"
             : AppState.Settings.TrainingWeaponFilter;
+
+        var importPresetsBtn = new Button { Content = "Importer les 5 combos de cette arme", Padding = new Thickness(10, 4, 10, 4) };
+        // Grisé tant qu'aucune arme précise n'est choisie, au lieu de laisser
+        // cliquer puis afficher une MessageBox d'erreur après coup — l'état
+        // du bouton dit directement ce qu'il faut faire avant de pouvoir agir.
+        importPresetsBtn.IsEnabled = _weaponFilterCombo.SelectedItem as string != "Toutes les armes";
+
         _weaponFilterCombo.SelectionChanged += (_, _) =>
         {
             var selected = _weaponFilterCombo.SelectedItem as string ?? "Toutes les armes";
             AppState.SetTrainingWeaponFilter(selected == "Toutes les armes" ? "" : selected);
+            importPresetsBtn.IsEnabled = selected != "Toutes les armes";
             RefreshCombosList();
         };
         weaponRow.Children.Add(_weaponFilterCombo);
 
-        var importPresetsBtn = new Button { Content = "Importer les 5 combos de cette arme", Padding = new Thickness(10, 4, 10, 4) };
         importPresetsBtn.Click += (_, _) =>
         {
             var selected = _weaponFilterCombo.SelectedItem as string;
-            if (string.IsNullOrEmpty(selected) || selected == "Toutes les armes")
-            {
-                MessageBox.Show("Choisis d'abord une arme précise dans la liste ci-dessus.", "Aucune arme sélectionnée", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
+            if (string.IsNullOrEmpty(selected) || selected == "Toutes les armes") return;
             AppState.ImportWeaponPresets(selected);
             RefreshCombosList();
         };
@@ -775,7 +788,24 @@ public partial class ControlPanelWindow : Window
             var perf = combo.TotalAttempts > 0
                 ? $" — meilleure série {combo.BestStreak}, {combo.TotalCompletions}/{combo.TotalAttempts} réussie(s)"
                 : "";
-            _combosList.Items.Add($"{weaponTag}{combo.Name}{masteredMark}  ({combo.Steps.Count} étapes){perf}");
+            var damageNote = string.IsNullOrEmpty(combo.DamageNote) ? "" : $"  ⚠ {combo.DamageNote}";
+            _combosList.Items.Add($"{weaponTag}{combo.Name}{masteredMark}  ({combo.Steps.Count} étapes){perf}{damageNote}");
+        }
+
+        if (_combosList.Items.Count == 0)
+        {
+            // Sans ce message, une liste vide (cas du tout premier lancement, ou
+            // d'un filtre d'arme sans combo importée) ressemble à un bug plutôt
+            // qu'à un état normal — rien n'indiquait quoi faire ensuite.
+            var hint = string.IsNullOrEmpty(filter)
+                ? "Aucune combo pour l'instant. Choisis une arme ci-dessus puis « Importer les 5 combos de cette arme », ou clique « Créer manuellement » / « Enregistrer une combo » plus bas."
+                : $"Aucune combo pour « {filter} ». Clique « Importer les 5 combos de cette arme » ci-dessus, ou choisis « Toutes les armes » pour voir les autres combos.";
+            _combosList.Items.Add(new ListBoxItem
+            {
+                Content = new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, Foreground = SubtleText },
+                IsEnabled = false,
+                Padding = new Thickness(6),
+            });
         }
 
         var restored = _visibleComboIndices.IndexOf(previouslySelectedAbsolute);
@@ -905,6 +935,7 @@ public partial class ControlPanelWindow : Window
             ("Ctrl+Alt+R", "Démarrer / arrêter l'enregistrement d'une combo"),
             ("Ctrl+Alt+U", "Ouvrir / donner le focus au panneau de contrôle"),
             ("Ctrl+Alt+I", "Révéler temporairement la combo (mode révision)"),
+            ("Ctrl+Alt+H", "Suspendre / reprendre la capture (utile hors du jeu)"),
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
