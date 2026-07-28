@@ -30,6 +30,7 @@ public partial class ComboEditorWindow : Window
     private TextBox _toleranceBox = null!;
     private ComboBox _matchModeCombo = null!;
     private ComboBox _weaponCombo = null!;
+    private ComboBox _legendCombo = null!;
     private TextBox _damageNoteBox = null!;
 
     // Une seule écoute active à la fois : un nouveau clic "Écouter" (ou la
@@ -99,6 +100,19 @@ public partial class ComboEditorWindow : Window
             SelectedItem = string.IsNullOrEmpty(_existing?.Weapon) ? "(aucune)" : _existing!.Weapon,
         };
         root.Children.Add(_weaponCombo);
+
+        root.Children.Add(FieldLabel("Légend (optionnel — filtre la liste par légend)"));
+        var legendItems = new List<string> { "(aucun)" };
+        legendItems.AddRange(LegendComboPresets.Legends);
+        _legendCombo = new ComboBox
+        {
+            Width = 220,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 8),
+            ItemsSource = legendItems,
+            SelectedItem = string.IsNullOrEmpty(_existing?.Legend) ? "(aucun)" : _existing!.Legend,
+        };
+        root.Children.Add(_legendCombo);
 
         var toleranceRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         toleranceRow.Children.Add(FieldLabel("Tolérance par défaut (ms)", inline: true));
@@ -368,6 +382,7 @@ public partial class ComboEditorWindow : Window
             Name = string.IsNullOrWhiteSpace(_nameBox.Text) ? "Combo" : _nameBox.Text.Trim(),
             Description = _descriptionBox.Text.Trim(),
             Weapon = _weaponCombo.SelectedItem as string == "(aucune)" ? "" : (_weaponCombo.SelectedItem as string ?? ""),
+            Legend = _legendCombo.SelectedItem as string == "(aucun)" ? "" : (_legendCombo.SelectedItem as string ?? ""),
             Steps = steps,
             DefaultToleranceMs = tolerance,
             MatchMode = _matchModeCombo.SelectedIndex == 1 ? MatchMode.IgnoreExtraneous : MatchMode.Strict,

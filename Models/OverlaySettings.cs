@@ -62,6 +62,11 @@ public sealed class OverlaySettings
     /// Vide = toutes les combos, sans distinction d'arme.</summary>
     public string TrainingWeaponFilter { get; set; } = "";
 
+    /// <summary>Légend sur lequel s'entraîner (voir LegendComboPresets.Legends) : filtre en plus
+    /// du filtre d'arme la liste des combos affichées/cyclées. Vide = toutes les combos, sans
+    /// distinction de légend (combos génériques d'arme incluses).</summary>
+    public string TrainingLegendFilter { get; set; } = "";
+
     /// <summary>Index dans System.Windows.Forms.Screen.AllScreens de l'écran sur lequel afficher
     /// l'overlay. -1 = écran principal (Screen.PrimaryScreen), comportement historique. Utile sur
     /// un setup multi-écran où le jeu tourne sur un moniteur secondaire : sans ce réglage l'overlay

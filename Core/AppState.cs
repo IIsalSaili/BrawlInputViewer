@@ -183,14 +183,61 @@ public static class AppState
         if (changed) NotifyCombosMutated();
     }
 
-    /// <summary>Index absolus (dans Combos) des combos qui correspondent au filtre d'arme actif
-    /// (Settings.TrainingWeaponFilter), ou tous les index si le filtre est vide.</summary>
+    /// <summary>Importe les combos préréglées d'un légend (voir LegendComboPresets), même logique
+    /// d'upsert par Id stable que ImportWeaponPresets.</summary>
+    public static void ImportLegendPresets(string legend)
+    {
+        var indexById = new Dictionary<string, int>();
+        for (var i = 0; i < _combos.Count; i++) indexById[_combos[i].Id] = i;
+
+        var changed = false;
+        foreach (var preset in LegendComboPresets.BuildPresetCombos().Where(c => c.Legend == legend))
+        {
+            if (indexById.TryGetValue(preset.Id, out var idx)) _combos[idx] = preset;
+            else _combos.Add(preset);
+            changed = true;
+        }
+        if (changed) NotifyCombosMutated();
+    }
+
+    /// <summary>Importe, pour un personnage, à la fois ses combos de légend (ImportLegendPresets)
+    /// et les combos génériques de chacune des armes qu'il utilise réellement
+    /// (LegendComboPresets.WeaponsFor + ImportWeaponPresets par arme) — un seul clic pour couvrir
+    /// tout ce qui est jouable sur ce personnage, plutôt que de devoir cliquer séparément sur le
+    /// bouton légend puis sur le bouton arme pour chacune des deux armes.</summary>
+    public static void ImportCharacterPresets(string legend)
+    {
+        ImportLegendPresets(legend);
+        foreach (var weapon in LegendComboPresets.WeaponsFor(legend)) ImportWeaponPresets(weapon);
+    }
+
+    /// <summary>Index absolus (dans Combos) des combos qui correspondent au personnage/arme actifs
+    /// (Settings.TrainingLegendFilter / TrainingWeaponFilter), ou tous les index si aucun filtre.
+    /// Un personnage n'est pas un simple ET avec l'arme : un personnage regroupe ses combos de
+    /// légend (Combo.Legend == personnage) ET les combos génériques des armes qu'il utilise
+    /// réellement (Combo.Weapon dans LegendComboPresets.WeaponsFor(personnage), Combo.Legend vide)
+    /// — sinon "Ada" tout seul ne montrerait que ses 2 combos Signature et cacherait les combos
+    /// génériques Blasters qu'elle peut pourtant jouer. TrainingWeaponFilter, quand un personnage
+    /// est actif, ne sert plus qu'à sous-filtrer sur une seule de ses armes ; sans personnage actif,
+    /// il redevient un filtre d'arme pur comme avant (parcourir une arme sans se soucier du perso).</summary>
     public static List<int> FilteredComboIndices()
     {
-        var filter = Settings.TrainingWeaponFilter;
+        var weaponFilter = Settings.TrainingWeaponFilter;
+        var legendFilter = Settings.TrainingLegendFilter;
         var result = new List<int>();
+        var legendWeapons = string.IsNullOrEmpty(legendFilter) ? null : LegendComboPresets.WeaponsFor(legendFilter);
         for (var i = 0; i < _combos.Count; i++)
-            if (string.IsNullOrEmpty(filter) || _combos[i].Weapon == filter) result.Add(i);
+        {
+            var combo = _combos[i];
+            if (legendWeapons is not null)
+            {
+                var matchesLegend = combo.Legend == legendFilter;
+                var matchesCharacterWeapon = string.IsNullOrEmpty(combo.Legend) && legendWeapons.Contains(combo.Weapon);
+                if (!matchesLegend && !matchesCharacterWeapon) continue;
+            }
+            if (!string.IsNullOrEmpty(weaponFilter) && combo.Weapon != weaponFilter) continue;
+            result.Add(i);
+        }
         return result;
     }
 
@@ -209,12 +256,24 @@ public static class AppState
     }
 
     /// <summary>Change l'arme sur laquelle s'entraîner : filtre la liste de combos cyclée/affichée.
-    /// Si la combo active ne correspond plus au nouveau filtre, bascule sur la première combo
-    /// filtrée (ou -1 s'il n'y en a aucune pour cette arme).</summary>
+    /// Sans personnage actif, filtre pur sur l'arme. Avec un personnage actif, sous-filtre sur une
+    /// seule de ses armes (voir FilteredComboIndices). Si la combo active ne correspond plus au
+    /// nouveau filtre, bascule sur la première combo filtrée (ou -1 s'il n'y en a aucune).</summary>
     public static void SetTrainingWeaponFilter(string weapon)
     {
         if (Settings.TrainingWeaponFilter == weapon) return;
         Settings.TrainingWeaponFilter = weapon;
+        SaveSettings();
+        if (!FilteredComboIndices().Contains(ActiveComboIndex)) SetActiveCombo(FirstFilteredIndex());
+    }
+
+    /// <summary>Change le personnage sur lequel s'entraîner : ses combos de légend + les combos
+    /// génériques des armes qu'il utilise réellement (voir FilteredComboIndices). Même logique de
+    /// repli que SetTrainingWeaponFilter.</summary>
+    public static void SetTrainingLegendFilter(string legend)
+    {
+        if (Settings.TrainingLegendFilter == legend) return;
+        Settings.TrainingLegendFilter = legend;
         SaveSettings();
         if (!FilteredComboIndices().Contains(ActiveComboIndex)) SetActiveCombo(FirstFilteredIndex());
     }

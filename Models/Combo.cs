@@ -25,6 +25,11 @@ public sealed class Combo
     /// vide pour une combo perso non liée à une arme précise.</summary>
     public string Weapon { get; set; } = "";
 
+    /// <summary>Nom du légend ciblé par cette combo (voir LegendComboPresets.Legends), pour les
+    /// combos qui n'existent que sur les armes/signatures d'un légend précis (ex. "Ada Blasters").
+    /// Vide pour une combo générique d'arme ou perso non liée à un légend.</summary>
+    public string Legend { get; set; } = "";
+
     public List<ComboStep> Steps { get; set; } = new();
     public int DefaultToleranceMs { get; set; } = 400;
     public MatchMode MatchMode { get; set; } = MatchMode.Strict;

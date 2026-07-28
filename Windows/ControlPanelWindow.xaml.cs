@@ -566,6 +566,7 @@ public partial class ControlPanelWindow : Window
 
     private ListBox _combosList = null!;
     private ComboBox _weaponFilterCombo = null!;
+    private ComboBox _legendFilterCombo = null!;
     private List<int> _visibleComboIndices = new();
 
     private UIElement BuildCombosTab()
@@ -573,43 +574,112 @@ public partial class ControlPanelWindow : Window
         var panel = new StackPanel();
         panel.Children.Add(SectionTitle("Combos"));
 
+        // Personnage d'abord : choisir un personnage montre directement ses combos Signature +
+        // les combos génériques des armes qu'il utilise réellement (voir AppState.
+        // FilteredComboIndices), au lieu de croiser arme et légend comme deux filtres indépendants
+        // sans lien entre eux (un légend n'a que 2 armes précises, pas 15 au hasard).
+        var characterRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        characterRow.Children.Add(new TextBlock { Text = "Personnage : ", Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+
+        var characterItems = new List<string> { "Tous les personnages" };
+        characterItems.AddRange(LegendComboPresets.Legends);
+        _legendFilterCombo = new ComboBox { Width = 220, ItemsSource = characterItems, Margin = new Thickness(0, 0, 6, 0) };
+        _legendFilterCombo.SelectedItem = string.IsNullOrEmpty(AppState.Settings.TrainingLegendFilter)
+            ? "Tous les personnages"
+            : AppState.Settings.TrainingLegendFilter;
+        characterRow.Children.Add(_legendFilterCombo);
+        panel.Children.Add(characterRow);
+        panel.Children.Add(HelpText("Restreint la liste ci-dessous, le sous-filtre d'arme et le cycle Ctrl+Alt+K à ce personnage. « Tous les personnages » repasse en filtre par arme seule, sans notion de perso."));
+
         var weaponRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        weaponRow.Children.Add(new TextBlock { Text = "Arme à entraîner : ", Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+        weaponRow.Children.Add(new TextBlock { Text = "Arme : ", Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+        _weaponFilterCombo = new ComboBox { Width = 220, Margin = new Thickness(0, 0, 6, 0) };
+        weaponRow.Children.Add(_weaponFilterCombo);
 
-        var weaponItems = new List<string> { "Toutes les armes" };
-        weaponItems.AddRange(WeaponComboPresets.Weapons);
-        _weaponFilterCombo = new ComboBox { Width = 220, ItemsSource = weaponItems, Margin = new Thickness(0, 0, 6, 0) };
-        _weaponFilterCombo.SelectedItem = string.IsNullOrEmpty(AppState.Settings.TrainingWeaponFilter)
-            ? "Toutes les armes"
-            : AppState.Settings.TrainingWeaponFilter;
+        var importPresetsBtn = new Button { Padding = new Thickness(10, 4, 10, 4) };
+        weaponRow.Children.Add(importPresetsBtn);
+        panel.Children.Add(weaponRow);
+        var weaponHelpText = HelpText("");
+        panel.Children.Add(weaponHelpText);
 
-        var importPresetsBtn = new Button { Content = "Importer les 5 combos de cette arme", Padding = new Thickness(10, 4, 10, 4) };
-        // Grisé tant qu'aucune arme précise n'est choisie, au lieu de laisser
-        // cliquer puis afficher une MessageBox d'erreur après coup — l'état
-        // du bouton dit directement ce qu'il faut faire avant de pouvoir agir.
-        importPresetsBtn.IsEnabled = _weaponFilterCombo.SelectedItem as string != "Toutes les armes";
+        // Le contenu du sous-filtre d'arme et du bouton d'import dépend du personnage choisi : sans
+        // personnage, c'est un filtre pur sur les 15 armes du jeu (comportement d'origine). Avec un
+        // personnage, la liste ne propose que ses armes réelles (LegendComboPresets.WeaponsFor) —
+        // impossible de se retrouver sur une combinaison perso/arme qui n'existe pas dans le jeu.
+        void RefreshWeaponFilterOptions()
+        {
+            var character = _legendFilterCombo.SelectedItem as string;
+            var noCharacter = string.IsNullOrEmpty(character) || character == "Tous les personnages";
+
+            if (noCharacter)
+            {
+                var weaponItems = new List<string> { "Toutes les armes" };
+                weaponItems.AddRange(WeaponComboPresets.Weapons);
+                _weaponFilterCombo.ItemsSource = weaponItems;
+                _weaponFilterCombo.SelectedItem = string.IsNullOrEmpty(AppState.Settings.TrainingWeaponFilter)
+                    ? "Toutes les armes"
+                    : AppState.Settings.TrainingWeaponFilter;
+                importPresetsBtn.Content = "Importer les 5 combos de cette arme";
+                importPresetsBtn.IsEnabled = _weaponFilterCombo.SelectedItem as string != "Toutes les armes";
+                weaponHelpText.Text = "Filtre la liste ci-dessous et les combos cyclées par Ctrl+Alt+K sur l'arme choisie. « Importer » ajoute les true combos vérifiés pour cette arme si elles n'y sont pas déjà.";
+            }
+            else
+            {
+                var weapons = LegendComboPresets.WeaponsFor(character!);
+                var allLabel = $"Toutes les armes de {character}";
+                var weaponItems = new List<string> { allLabel };
+                weaponItems.AddRange(weapons);
+                _weaponFilterCombo.ItemsSource = weaponItems;
+                _weaponFilterCombo.SelectedItem = weapons.Contains(AppState.Settings.TrainingWeaponFilter)
+                    ? AppState.Settings.TrainingWeaponFilter
+                    : allLabel;
+                importPresetsBtn.Content = $"Importer les combos de {character}";
+                importPresetsBtn.IsEnabled = true;
+                weaponHelpText.Text = $"Combos Signature de {character} + combos génériques de ses {weapons.Count} arme(s). « Importer » ajoute les deux d'un coup.";
+            }
+        }
+
+        _legendFilterCombo.SelectionChanged += (_, _) =>
+        {
+            var selected = _legendFilterCombo.SelectedItem as string ?? "Tous les personnages";
+            AppState.SetTrainingLegendFilter(selected == "Tous les personnages" ? "" : selected);
+            // Le filtre d'arme précédent peut ne plus avoir de sens pour ce personnage (ex. "Marteau"
+            // choisi puis bascule sur "Ada", qui ne joue pas Marteau) — repart sur "toutes ses armes".
+            AppState.SetTrainingWeaponFilter("");
+            RefreshWeaponFilterOptions();
+            RefreshCombosList();
+        };
 
         _weaponFilterCombo.SelectionChanged += (_, _) =>
         {
-            var selected = _weaponFilterCombo.SelectedItem as string ?? "Toutes les armes";
-            AppState.SetTrainingWeaponFilter(selected == "Toutes les armes" ? "" : selected);
-            importPresetsBtn.IsEnabled = selected != "Toutes les armes";
+            var selected = _weaponFilterCombo.SelectedItem as string ?? "";
+            var isAllOption = selected == "Toutes les armes" || selected.StartsWith("Toutes les armes de ");
+            AppState.SetTrainingWeaponFilter(isAllOption ? "" : selected);
             RefreshCombosList();
         };
-        weaponRow.Children.Add(_weaponFilterCombo);
 
         importPresetsBtn.Click += (_, _) =>
         {
-            var selected = _weaponFilterCombo.SelectedItem as string;
-            if (string.IsNullOrEmpty(selected) || selected == "Toutes les armes") return;
-            AppState.ImportWeaponPresets(selected);
+            var character = _legendFilterCombo.SelectedItem as string;
+            if (!string.IsNullOrEmpty(character) && character != "Tous les personnages")
+            {
+                AppState.ImportCharacterPresets(character);
+                RefreshCombosList();
+                return;
+            }
+
+            var weapon = _weaponFilterCombo.SelectedItem as string;
+            if (string.IsNullOrEmpty(weapon) || weapon == "Toutes les armes") return;
+            AppState.ImportWeaponPresets(weapon);
             RefreshCombosList();
         };
-        weaponRow.Children.Add(importPresetsBtn);
-        panel.Children.Add(weaponRow);
-        panel.Children.Add(HelpText("Filtre la liste ci-dessous et les combos cyclées par Ctrl+Alt+K sur l'arme choisie. « Importer » ajoute 5 combos scrappées (nLight/sLight/dLight/nSig/sSig/dSig) pour cette arme si elles n'y sont pas déjà."));
 
+        // Créée avant le premier RefreshWeaponFilterOptions() : celui-ci fixe SelectedItem sur
+        // _weaponFilterCombo, ce qui déclenche son SelectionChanged synchroniquement et donc
+        // RefreshCombosList() — qui a besoin que _combosList existe déjà.
         _combosList = new ListBox { Height = 200, Background = CardBg, Foreground = TextColor, BorderThickness = new Thickness(0) };
+
+        RefreshWeaponFilterOptions();
         RefreshCombosList();
         panel.Children.Add(_combosList);
 
@@ -794,13 +864,16 @@ public partial class ControlPanelWindow : Window
         _visibleComboIndices.Clear();
 
         var filter = AppState.Settings.TrainingWeaponFilter;
-        for (var i = 0; i < AppState.Combos.Count; i++)
+        var legendFilter = AppState.Settings.TrainingLegendFilter;
+        // Réutilise le même calcul que AppState.CycleCombo/ActiveComboFilteredPosition au lieu de
+        // ré-implémenter la logique de filtre ici — sinon les deux finissent par diverger (c'est
+        // exactement ce qui s'était passé avec l'ancien ET arme/légend indépendant).
+        foreach (var i in AppState.FilteredComboIndices())
         {
             var combo = AppState.Combos[i];
-            if (!string.IsNullOrEmpty(filter) && combo.Weapon != filter) continue;
-
             _visibleComboIndices.Add(i);
-            var weaponTag = string.IsNullOrEmpty(combo.Weapon) ? "" : $"[{combo.Weapon}] ";
+            var legendTag = string.IsNullOrEmpty(combo.Legend) ? "" : $"{combo.Legend} ";
+            var weaponTag = string.IsNullOrEmpty(combo.Weapon) ? "" : $"[{legendTag}{combo.Weapon}] ";
             var masteredMark = combo.Mastered ? " ✓" : "";
             var perf = combo.TotalAttempts > 0
                 ? $" — meilleure série {combo.BestStreak}, {combo.TotalCompletions}/{combo.TotalAttempts} réussie(s)"
@@ -812,11 +885,15 @@ public partial class ControlPanelWindow : Window
         if (_combosList.Items.Count == 0)
         {
             // Sans ce message, une liste vide (cas du tout premier lancement, ou
-            // d'un filtre d'arme sans combo importée) ressemble à un bug plutôt
-            // qu'à un état normal — rien n'indiquait quoi faire ensuite.
-            var hint = string.IsNullOrEmpty(filter)
-                ? "Aucune combo pour l'instant. Choisis une arme ci-dessus puis « Importer les 5 combos de cette arme », ou clique « Créer manuellement » / « Enregistrer une combo » plus bas."
-                : $"Aucune combo pour « {filter} ». Clique « Importer les 5 combos de cette arme » ci-dessus, ou choisis « Toutes les armes » pour voir les autres combos.";
+            // d'un filtre d'arme/légend sans combo importée) ressemble à un bug
+            // plutôt qu'à un état normal — rien n'indiquait quoi faire ensuite.
+            string hint;
+            if (string.IsNullOrEmpty(filter) && string.IsNullOrEmpty(legendFilter))
+                hint = "Aucune combo pour l'instant. Choisis une arme ci-dessus puis « Importer les 5 combos de cette arme », ou clique « Créer manuellement » / « Enregistrer une combo » plus bas.";
+            else if (!string.IsNullOrEmpty(legendFilter))
+                hint = $"Aucune combo pour « {legendFilter} »{(string.IsNullOrEmpty(filter) ? "" : $" sur {filter}")}. Clique « Importer les combos de {legendFilter} » ci-dessus (certains personnages n'ont pas de combo listé), ou choisis « Tous les personnages ».";
+            else
+                hint = $"Aucune combo pour « {filter} ». Clique « Importer les 5 combos de cette arme » ci-dessus, ou choisis « Toutes les armes » pour voir les autres combos.";
             _combosList.Items.Add(new ListBoxItem
             {
                 Content = new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, Foreground = SubtleText },

@@ -156,29 +156,37 @@ rangement, sans impact sur la compilation ni sur le code appelant.
 - **Config/ComboConfig.cs** — persistance de `combos.json` (même pattern que
   `KeyBindConfig`), sans valeurs par défaut : l'app démarre à 0 combo, c'est
   à l'utilisateur d'en créer (enregistrement en direct ou éditeur manuel).
-- **Config/WeaponComboPresets.cs / Combo.Weapon** — bibliothèque de 5 combos
-  par arme, sur les 15 armes actuelles du jeu (Épée, Lance, Marteau, Blasters,
-  Katars, Hache, Arc, Faux, Épée à deux mains, Gantelets, Canon, Orbe,
-  Lance-fusée, Bottes de combat, Chakram — liste vérifiée sur
-  liquipedia.net/brawlhalla/Weapons ; "Fists" et "Battle Sammich" n'existent
-  plus dans le jeu actuel). Chaque combo vient de séquences réellement
-  documentées par des guides communautaires (gamespecifications.com,
-  bluestacks.com, dashfight.com pour Bottes de combat, mygamingtutorials.com
-  pour Chakram), citées dans la `Description` de chaque combo — voir le
-  correctif "Version 9" plus bas : une première version de ce fichier avait
-  des combos **inventées** (mêmes 2-3 patterns génériques recopiés sur les 15
-  armes), quasiment aucune ne fonctionnait en jeu. Ne jamais réintroduire de
-  combo non sourcée dans ce fichier. Traduction vers le vocabulaire d'actions
-  de l'app (voir le docstring en tête de fichier pour le détail) : une
-  variante latérale/basse/haute d'une attaque = direction (`Gauche`/`Droite`/
-  `Haut`/`Bas`) pressée avec `Att. légère`/`Att. forte` dans un même
-  `ComboStep` ; un `Saut` explicite remplace un saut réel ou un Gravity
-  Cancel (confirmé équivalent par les sources elles-mêmes pour le Canon) ;
-  `Haut`+`Att. forte` représente la Récupération ; un double `Bas` seul
-  représente un Ground Pound ; une direction seule représente un Dash. Chaque
-  combo a un `Id` stable (`preset-<arme>-<n>`) et `AppState.ImportWeaponPresets`
-  fait un **upsert** (pas juste un skip-si-présent) : si le contenu d'une
-  combo préréglée change suite à une correction, la réimporter met à jour son
+- **Config/WeaponComboPresets.cs / Combo.Weapon** — bibliothèque de combos
+  d'arme génériques (non liés à un légend), sur 11 des 15 armes du jeu
+  (Épée, Lance, Marteau, Blasters, Katars, Hache, Arc, Faux, Gantelets, Canon —
+  Épée à deux mains/Orbe/Lance-fusée/Bottes de combat/Chakram n'ont
+  volontairement aucun combo, voir plus bas). Contenu **entièrement réécrit**
+  suite à un nouveau signalement de combos fausses (2ème occurrence après le
+  correctif "Version 9"/"Correctif Faux" plus bas, cette fois sur la quasi
+  totalité du fichier) : les combos viennent maintenant d'un post Reddit de
+  true combos (non-esquivables) collé directement par l'utilisateur dans la
+  conversation, avec seuil de Dex par combo — pas d'un guide web à
+  fetch/paraphraser, donc pas de risque de citation fabriquée comme les fois
+  précédentes. Le post ne couvrait que 11 armes ; les 4 autres ont
+  volontairement 0 combo plutôt que de garder l'ancien contenu non vérifié à
+  côté du contenu vérifié. Ne jamais réintroduire de combo non sourcée dans ce
+  fichier. Traduction vers le vocabulaire d'actions de l'app (voir le
+  docstring en tête de fichier pour le détail) : une variante latérale/
+  basse/haute d'une attaque (Light **ou** Signature — voir bullet
+  LegendComboPresets ci-dessous) = direction (`Gauche`/`Droite`/`Haut`/`Bas`)
+  pressée avec `Att. légère`/`Att. forte` dans un même `ComboStep` ; un `Saut`
+  explicite remplace un saut réel avant une attaque aérienne (nAir/sAir/dAir) ;
+  `Esquive` représente un Gravity Cancel ; `Haut`+`Att. forte` représente la
+  Récupération ; un double `Bas` seul représente un Ground Pound ; une
+  direction seule représente un Dash ; XPivot/Reverse/Ledge cancel/Wall
+  cancel (techniques de mouvement, pas des boutons) sont traduits par la
+  séquence la plus proche, la technique exacte étant précisée en
+  `Description` (l'app ne peut pas la valider). Le niveau de Dex minimum
+  (mécanique que l'app ne modélise pas) est indicatif, en `Description`
+  uniquement — aucun combo n'est bloqué selon un Dex. Chaque combo a un `Id`
+  stable (`preset-<arme>-<n>`) et `AppState.ImportWeaponPresets` fait un
+  **upsert** (pas juste un skip-si-présent) : si le contenu d'une combo
+  préréglée change suite à une correction, la réimporter met à jour son
   contenu au lieu de laisser une ancienne version fausse bloquée dans
   `combos.json`. `Combo.Weapon` (vide pour les combos perso) sert de filtre :
   `AppState.Settings.TrainingWeaponFilter` + `AppState.FilteredComboIndices`/
@@ -190,6 +198,27 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   (`_visibleComboIndices` fait le lien avec les index absolus de
   `AppState.Combos` pour modifier/dupliquer/supprimer/réordonner sans se
   tromper de combo).
+- **Config/LegendComboPresets.cs / Combo.Legend** — bibliothèque séparée de
+  true combos propres à un légend précis (utilisant une attaque Signature
+  exclusive à ce légend sur une arme donnée, ex. "Ada Blasters" : dLight >
+  sSig). Même source Reddit et mêmes conventions de traduction que
+  `WeaponComboPresets.cs` — Signature (nSig/sSig/dSig) est **le même bouton**
+  que l'attaque forte générique en Brawlhalla (direction + `Att. forte`), ce
+  n'est pas une action séparée à ajouter au mapping clavier. Une combo de
+  légende dépend à la fois d'un légend ET d'une arme (`Combo.Legend` +
+  `Combo.Weapon` tous les deux renseignés), certains légends ayant des combos
+  sur plusieurs armes (ex. Cassidy sur Blasters et Marteau). `Id` stable
+  (`preset-legend-<légend>-<n>`), upsert via `AppState.ImportLegendPresets`.
+  Filtre dédié en plus (pas à la place) du filtre d'arme :
+  `AppState.Settings.TrainingLegendFilter` + `FilteredComboIndices` combinent
+  les deux filtres en ET (ex. "Ada" + "Blasters" ne montre que les combos Ada
+  sur Blasters). Onglet Combos : sélecteur de légend + bouton "Importer les
+  combos de ce légend", sous le sélecteur d'arme existant. Tous les légends
+  du jeu n'ont pas de combo listé dans la source. `ComboEditorWindow` a aussi
+  un sélecteur "Légend (optionnel)" à côté du sélecteur d'arme, même raison
+  que ce dernier (voir plus bas, correctif §1.3) : une combo créée à la main
+  doit pouvoir être rattachée à un légend pour rester visible sous un filtre
+  de légend actif.
 - **Models/OverlaySettings.cs / Config/OverlaySettingsConfig.cs** — réglages
   persistés dans `settings.json` : échelle, opacité, position de l'overlay
   (`BottomLeft`/`BottomRight`/`TopLeft`/`TopRight`/`Free`), mode par défaut au
@@ -739,6 +768,66 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   direction (*Plain Arrow*) pointe vers le bas par défaut (l'ancienne
   pointait à droite), donc `Bas=0°, Gauche=90°, Haut=180°, Droite=270°` au
   lieu de l'ancien mapping.
+- Réécriture complète de `WeaponComboPresets.cs` + ajout de
+  `LegendComboPresets.cs` : l'utilisateur a signalé que les combos existantes
+  restaient globalement fausses ("de merde") et a fourni directement un post
+  Reddit de true combos vérifiés (non-esquivables, testés à 0% de dégâts,
+  avec seuils de Dex) en remplacement. Tout le contenu précédent de
+  `WeaponComboPresets.cs` a été supprimé plutôt que corrigé au cas par cas
+  (contrairement aux correctifs "Version 9"/Faux/Gravity Cancel précédents,
+  ciblés) car le signalement portait sur l'ensemble du fichier. Nouveauté
+  d'architecture nécessaire pour couvrir les combos de légende du post (qui
+  utilisent une attaque Signature propre à un légend, ex. "Ada Blasters") :
+  ajout de `Combo.Legend` (en plus de `Combo.Weapon` existant), d'un fichier
+  séparé `LegendComboPresets.cs`, et d'un filtre légend dédié dans
+  `AppState`/`OverlaySettings`/`ControlPanelWindow`/`ComboEditorWindow` — voir
+  les bullets `WeaponComboPresets.cs`/`LegendComboPresets.cs` plus haut pour
+  le détail. Clarifié avec l'utilisateur avant de coder que Signature en
+  Brawlhalla n'est **pas** un bouton séparé mais littéralement l'attaque
+  forte (déjà mappée sur `Att. forte`) — pas besoin d'ajouter d'action ni de
+  toucher `KeyBindConfig`. Le post Reddit listait aussi séparément une
+  section "Spear" et une section "Lance" avec des entrées différentes ; comme
+  le jeu actuel n'a qu'une seule arme de ce nom (Spear = "Lance" en
+  français ici), les deux ont été fusionnées sous "Lance" (un doublon exact
+  entre les deux dédupliqué). Seules 11 des 15 armes étaient couvertes par le
+  post ; les 4 autres (Épée à deux mains, Orbe, Lance-fusée, Bottes de
+  combat, Chakram) n'ont donc plus aucun combo prérégle dans l'app, plutôt
+  que de laisser leur ancien contenu non vérifié à côté de combos maintenant
+  vérifiés — à compléter uniquement si l'utilisateur fournit une source aussi
+  fiable pour ces armes.
+- Refonte du filtre Arme/Légend en sélecteur "Personnage" (retour utilisateur :
+  avoir deux filtres indépendants — arme et légend — combinés en ET était
+  "étrange", puisqu'un légend n'a que 2 armes précises dans le jeu réel, pas
+  15 au hasard ; on pouvait choisir "Ada" + "Marteau" (une arme qu'Ada
+  n'utilise pas) et se retrouver avec une liste vide sans explication.
+  Tentative de récupérer une vraie table légend→2 armes pour piloter le
+  nouveau sélecteur (liquipedia.net, brawlhalla.fandom.com) infructueuse
+  (page sans données de poids, 402 côté fandom, un "tier list" listant des
+  personnages hors-roster manifestement peu fiable) — plutôt que de
+  fabriquer cette table de mémoire (même piège que "Version 9"/"Correctif
+  Faux" plus haut), `LegendComboPresets.WeaponsFor(legend)` dérive les armes
+  d'un personnage du contenu déjà vérifié de `Table` (les armes citées dans
+  ses combos Signature), sans introduire de nouvelle donnée à sourcer. Onglet
+  Combos : le sélecteur "Personnage" (ex-"Légend") vient maintenant en
+  premier ; le sélecteur "Arme" devient un sous-filtre dont les options
+  dépendent du personnage choisi (`RefreshWeaponFilterOptions` dans
+  `ControlPanelWindow.BuildCombosTab`) — "Toutes les armes" (15 armes) sans
+  personnage, ou "Toutes les armes de *Perso*" + uniquement ses armes réelles
+  si un personnage est sélectionné. `AppState.FilteredComboIndices` change de
+  sémantique en conséquence : un personnage actif n'est plus un simple ET
+  avec l'arme, il regroupe ses combos Signature (`Combo.Legend == perso`) ET
+  les combos génériques des armes qu'il utilise réellement (`Combo.Weapon`
+  dans `LegendComboPresets.WeaponsFor(perso)`, `Combo.Legend` vide) — sinon
+  choisir juste "Ada" n'aurait montré que ses 2 combos Signature en cachant
+  les combos génériques Blasters qu'elle peut pourtant jouer.
+  `AppState.ImportCharacterPresets(legend)` bundle `ImportLegendPresets` +
+  `ImportWeaponPresets` pour chacune de ses armes détectées, pour importer
+  tout ce qui est jouable sur ce personnage en un seul clic au lieu de devoir
+  cliquer sur le bouton légend puis sur le bouton arme séparément.
+  `RefreshCombosList` appelle maintenant `AppState.FilteredComboIndices()`
+  directement au lieu de dupliquer la logique de filtre localement (c'est
+  cette divergence entre deux implémentations du même filtre qui avait
+  permis la combinaison arme/légend incohérente en premier lieu).
 
 ## Pistes évoquées mais pas demandées/faites
 
