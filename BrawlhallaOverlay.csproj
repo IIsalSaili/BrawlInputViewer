@@ -22,11 +22,4 @@
     <Using Remove="System.Drawing" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Icônes des pastilles du mode Tutoriel (voir MainWindow.ActionIconAssets) :
-         embarquées dans l'assembly (Resource), chargées via pack URI, pas besoin
-         de les copier à côté de l'exe. -->
-    <Resource Include="Assets\Icons\*.png" />
-  </ItemGroup>
-
 </Project>

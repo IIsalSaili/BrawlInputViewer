@@ -29,6 +29,7 @@ public partial class ComboEditorWindow : Window
     private TextBox _descriptionBox = null!;
     private TextBox _toleranceBox = null!;
     private ComboBox _matchModeCombo = null!;
+    private ComboBox _weaponCombo = null!;
     private TextBox _damageNoteBox = null!;
 
     // Une seule écoute active à la fois : un nouveau clic "Écouter" (ou la
@@ -38,10 +39,18 @@ public partial class ComboEditorWindow : Window
 
     public Combo? Result { get; private set; }
 
-    public ComboEditorWindow(Combo? existing)
+    // Vrai quand cette fenêtre sert d'écran de relecture juste après un enregistrement
+    // en direct (Ctrl+Alt+R) plutôt que d'édition d'une combo déjà sauvegardée — même
+    // formulaire, juste un titre/aide différents pour que l'utilisateur comprenne qu'il
+    // relit une capture pas encore validée (voir MainWindow.ReviewRecordedCombo et
+    // docs/audit_features.md §1.5, qui sauvegardait auparavant direct sans relecture).
+    private readonly bool _isRecordingReview;
+
+    public ComboEditorWindow(Combo? existing, bool isRecordingReview = false)
     {
         InitializeComponent();
         _existing = existing;
+        _isRecordingReview = isRecordingReview;
         Build();
         Loaded += (_, _) => _nameBox.Focus();
         Closed += (_, _) => _cancelActiveListen?.Invoke();
@@ -51,7 +60,19 @@ public partial class ComboEditorWindow : Window
     {
         var root = new StackPanel();
 
-        root.Children.Add(new TextBlock { Text = _existing is null ? "Nouvelle combo" : "Modifier la combo", Foreground = TextColor, FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12) });
+        var titleText = _isRecordingReview ? "Vérifier la combo enregistrée" : _existing is null ? "Nouvelle combo" : "Modifier la combo";
+        root.Children.Add(new TextBlock { Text = titleText, Foreground = TextColor, FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12) });
+        if (_isRecordingReview)
+        {
+            root.Children.Add(new TextBlock
+            {
+                Text = "Vérifie les étapes capturées (supprime une étape parasite, ajuste les tolérances) avant de valider — rien n'est encore sauvegardé.",
+                Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 10),
+            });
+        }
 
         root.Children.Add(FieldLabel("Nom"));
         _nameBox = new TextBox { Text = _existing?.Name ?? "Nouvelle combo", Margin = new Thickness(0, 0, 0, 8) };
@@ -60,6 +81,24 @@ public partial class ComboEditorWindow : Window
         root.Children.Add(FieldLabel("Description (optionnel)"));
         _descriptionBox = new TextBox { Text = _existing?.Description ?? "", Margin = new Thickness(0, 0, 0, 8) };
         root.Children.Add(_descriptionBox);
+
+        // Sans ça, une combo créée/enregistrée à la main ne peut jamais être
+        // rattachée à une arme (Combo.Weapon ne se remplissait auparavant que
+        // via l'import des presets), donc elle devenait invisible dès qu'un
+        // filtre d'arme était actif ailleurs dans l'app — voir
+        // docs/audit_features.md §1.3.
+        root.Children.Add(FieldLabel("Arme (optionnel — filtre la liste par arme)"));
+        var weaponItems = new List<string> { "(aucune)" };
+        weaponItems.AddRange(WeaponComboPresets.Weapons);
+        _weaponCombo = new ComboBox
+        {
+            Width = 220,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 8),
+            ItemsSource = weaponItems,
+            SelectedItem = string.IsNullOrEmpty(_existing?.Weapon) ? "(aucune)" : _existing!.Weapon,
+        };
+        root.Children.Add(_weaponCombo);
 
         var toleranceRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         toleranceRow.Children.Add(FieldLabel("Tolérance par défaut (ms)", inline: true));
@@ -72,6 +111,7 @@ public partial class ComboEditorWindow : Window
             Margin = new Thickness(6, 0, 0, 0),
             ItemsSource = new[] { "Strict", "Tolérant (ignore le mouvement pur)" },
             SelectedIndex = _existing?.MatchMode == MatchMode.IgnoreExtraneous ? 1 : 0,
+            ToolTip = "Strict : une direction tenue en trop (non demandée par l'étape) fait échouer la combo. Tolérant : le mouvement pur hors combo est ignoré.",
         };
         toleranceRow.Children.Add(_matchModeCombo);
         root.Children.Add(toleranceRow);
@@ -116,9 +156,9 @@ public partial class ComboEditorWindow : Window
         root.Children.Add(addStepBtn);
 
         var buttonsRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = "Annuler", Padding = new Thickness(14, 5, 14, 5), Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _isRecordingReview ? "Rejeter l'enregistrement" : "Annuler", Padding = new Thickness(14, 5, 14, 5), Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => { DialogResult = false; Close(); };
-        var saveBtn = new Button { Content = "Enregistrer", Padding = new Thickness(14, 5, 14, 5) };
+        var saveBtn = new Button { Content = _isRecordingReview ? "Valider et enregistrer" : "Enregistrer", Padding = new Thickness(14, 5, 14, 5) };
         saveBtn.Click += (_, _) => SaveAndClose();
         buttonsRow.Children.Add(cancelBtn);
         buttonsRow.Children.Add(saveBtn);
@@ -327,7 +367,7 @@ public partial class ComboEditorWindow : Window
             Id = _existing?.Id ?? Guid.NewGuid().ToString("N"),
             Name = string.IsNullOrWhiteSpace(_nameBox.Text) ? "Combo" : _nameBox.Text.Trim(),
             Description = _descriptionBox.Text.Trim(),
-            Weapon = _existing?.Weapon ?? "",
+            Weapon = _weaponCombo.SelectedItem as string == "(aucune)" ? "" : (_weaponCombo.SelectedItem as string ?? ""),
             Steps = steps,
             DefaultToleranceMs = tolerance,
             MatchMode = _matchModeCombo.SelectedIndex == 1 ? MatchMode.IgnoreExtraneous : MatchMode.Strict,

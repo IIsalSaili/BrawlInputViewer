@@ -61,4 +61,11 @@ public sealed class OverlaySettings
     /// des combos affichées/cyclées (Ctrl+Alt+K) au panneau de contrôle et en mode Tutoriel.
     /// Vide = toutes les combos, sans distinction d'arme.</summary>
     public string TrainingWeaponFilter { get; set; } = "";
+
+    /// <summary>Index dans System.Windows.Forms.Screen.AllScreens de l'écran sur lequel afficher
+    /// l'overlay. -1 = écran principal (Screen.PrimaryScreen), comportement historique. Utile sur
+    /// un setup multi-écran où le jeu tourne sur un moniteur secondaire : sans ce réglage l'overlay
+    /// restait toujours calé sur SystemParameters.WorkArea (toujours l'écran principal Windows),
+    /// voir docs/audit_features.md §1.4.</summary>
+    public int MonitorIndex { get; set; } = -1;
 }

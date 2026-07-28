@@ -119,17 +119,25 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   `Timeout` (bonne touche mais hors délai) pour que l'UI affiche une couleur
   différente selon la cause (diagnostic immédiat, sans devoir recouper avec
   l'historique). `MatchMode.Strict` (défaut, exposé dans `ComboEditorWindow`) :
-  tout input hors combo réinitialise direct. `MatchMode.IgnoreExtraneous` :
-  ignore le mouvement pur hors combo au lieu de reset. Tolérance de
-  récupération (`AttackRecoveryLockMs`, 180ms, indépendante du `MatchMode`) :
-  un bouton d'attaque (`Att. légère`/`Att. forte`) différent de celui attendu,
-  pressé dans les 180ms suivant une attaque précédente, est ignoré au lieu de
-  casser la combo — en jeu le personnage est encore en animation de
-  récupération et cet input est de toute façon avalé par le moteur, ce n'est
-  donc pas une vraie faute de timing du joueur. Ne s'applique ni au tout
-  premier input d'une tentative, ni aux actions hors attaque (`Saut`,
-  `Esquive`, `Lancer`, `Taunt`, directions), qui gardent le comportement
-  strict existant. **Le timing (`MinDelayMs`/`MaxDelayMs`/`DefaultToleranceMs`)
+  une direction tenue en plus de ce qui est demandé par l'étape (extra de
+  mouvement) fait échouer la combo, comme n'importe quel mauvais bouton
+  d'action. `MatchMode.IgnoreExtraneous` : le mouvement pur hors combo est
+  ignoré au lieu de faire échouer — un joueur garde souvent une direction
+  enfoncée en enchaînant (ex. tenir Droite en sautant), ce n'est pas une
+  faute dans ce mode. **Correctif** : `ComboRunner.Feed` a longtemps ignoré
+  `Combo.MatchMode` (le sélecteur de l'éditeur se sauvegardait mais n'avait
+  aucun effet, les deux modes se comportaient comme `IgnoreExtraneous`) —
+  voir `docs/audit_features.md` §1.1 pour le diagnostic, corrigé depuis (le
+  choix fait dans l'éditeur a maintenant un effet réel). Les boutons
+  d'action (`Group == "Action"`), eux, sont toujours jugés à l'identique
+  quel que soit le `MatchMode` : un mash/répétition du bouton qui vient de
+  valider l'étape précédente (`_lastConsumedActionKeys`, ex. cliquer Saut 3
+  fois pour caler son timing) est ignoré au lieu de casser la suite — pas
+  une histoire de délai (contrairement à une ancienne fenêtre de tolérance
+  de récupération chronométrée à 180ms qui existait dans une version
+  antérieure du moteur et a depuis été remplacée par ce mécanisme basé sur
+  l'identité du dernier bouton validé, sans notion de temps). **Le timing
+  (`MinDelayMs`/`MaxDelayMs`/`DefaultToleranceMs`)
   n'est plus une condition d'échec** : `ComboRunner.Feed` valide une étape dès
   que les bonnes actions sont pressées, quel que soit le délai écoulé — le
   jeu réel n'exige jamais un rythme aussi précis pour qu'une combo touche.
@@ -186,7 +194,15 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   persistés dans `settings.json` : échelle, opacité, position de l'overlay
   (`BottomLeft`/`BottomRight`/`TopLeft`/`TopRight`/`Free`), mode par défaut au
   démarrage, modes favoris inclus dans le cycle `Ctrl+Alt+P`, option "garder
-  la série de réussites même après une combo ratée".
+  la série de réussites même après une combo ratée". `MonitorIndex` (-1 =
+  écran principal, défaut) choisit l'écran cible sur un setup multi-moniteur
+  (onglet Apparence, `ControlPanelWindow`) : `MainWindow.GetTargetWorkArea`
+  résout l'écran voulu via `System.Windows.Forms.Screen.AllScreens` au lieu
+  de toujours utiliser `SystemParameters.WorkArea` (qui ne renvoie que
+  l'écran principal Windows, indépendamment d'où tourne le jeu) — voir
+  `docs/audit_features.md` §1.4. Conversion pixels→unités WPF approximée par
+  le ratio de mise à l'échelle de l'écran principal (correct si tous les
+  écrans partagent la même échelle DPI, cas le plus courant).
 - **Config/StartupConfig.cs** — active/désactive le lancement automatique au
   démarrage de Windows via la clé de registre utilisateur
   `HKCU\...\Run` (pas besoin de droits admin, pas de tâche planifiée).
@@ -306,7 +322,21 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   en ms). Vérifie à la sauvegarde que chaque action tapée correspond bien à
   une action existante dans `KeyBindConfig` (sinon message d'erreur listant
   les actions valides — une combo avec un nom d'action mal orthographié ne
-  pourrait jamais être validée en jeu sans ce garde-fou).
+  pourrait jamais être validée en jeu sans ce garde-fou). Champ "Arme
+  (optionnel)" (`_weaponCombo`) qui écrit `Combo.Weapon` : absent jusqu'ici,
+  ce qui rendait une combo créée/enregistrée à la main invisible dès qu'un
+  filtre d'arme était actif ailleurs (`Combo.Weapon` ne se remplissait que
+  via l'import des presets) — voir `docs/audit_features.md` §1.3. Aussi
+  réutilisé comme **écran de relecture après un enregistrement en direct**
+  (`isRecordingReview: true`, appelé depuis `MainWindow.SaveRecordedCombo`) :
+  auparavant la combo capturée par `Ctrl+Alt+R` était sauvegardée directement
+  sans passer par cet éditeur (`docs/plan.md §1.3.A` prévoyait un tel écran,
+  jamais fait — voir `docs/audit_features.md` §1.5), donc la seule façon de
+  corriger un input parasite capturé par erreur était de rouvrir l'éditeur
+  après coup depuis la liste. Maintenant, arrêter l'enregistrement ouvre cet
+  éditeur pré-rempli avec les étapes capturées (titre "Vérifier la combo
+  enregistrée", boutons "Valider et enregistrer" / "Rejeter l'enregistrement")
+  avant toute écriture dans `combos.json`.
 
 ## Mapping clavier actuel (défauts dans `KeyBindConfig.Defaults`)
 
@@ -426,12 +456,17 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   d'arme dans l'onglet Combos du panneau de contrôle (`Combo.Weapon` +
   `AppState.Settings.TrainingWeaponFilter`), qui filtre à la fois la liste
   affichée et le cycle `Ctrl+Alt+K`/mode Tutoriel sur l'arme choisie. Ajout d'une
-  tolérance de récupération dans `ComboRunner` (`AttackRecoveryLockMs`) :
-  un mauvais bouton d'attaque pressé juste après une attaque précédente est
-  ignoré plutôt que de casser la combo, pour refléter que le personnage est
-  encore en animation de récupération à ce moment-là en jeu (donc cet input
-  ne "compte" pas vraiment) — ne s'applique qu'aux deux boutons d'attaque,
-  pas aux autres actions (mouvement, saut, esquive, lancer, taunt).
+  tolérance de récupération dans `ComboRunner` (`AttackRecoveryLockMs`, fenêtre
+  de 180ms) : un mauvais bouton d'attaque pressé juste après une attaque
+  précédente était ignoré plutôt que de casser la combo, pour refléter que le
+  personnage est encore en animation de récupération à ce moment-là en jeu.
+  **Depuis remplacé** (voir le retrait du timing comme condition d'échec
+  ci-dessous) par un mécanisme sans notion de délai basé sur l'identité du
+  dernier bouton validé (`_lastConsumedActionKeys`, section `ComboRunner`
+  ci-dessus) — `AttackRecoveryLockMs` n'existe plus dans le code, gardé ici
+  seulement comme trace historique de la transition (l'ancienne doc de cette
+  section affirmait encore son existence après coup, incohérence relevée et
+  corrigée via `docs/audit_features.md` §1.2).
 - Retour immédiat après test en jeu : même avec la tolérance de récupération,
   les combos (surtout enregistrées, dont le `MaxDelayMs` par étape vient du
   rythme de l'enregistrement × 1.6) échouaient encore dès que le joueur allait
@@ -637,6 +672,73 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   Une seule écoute active à la fois : `_cancelActiveListen` coupe proprement
   celle en cours si un autre bouton "Écouter" est cliqué ou si la fenêtre se
   ferme pendant l'écoute.
+- Correctifs suite à l'audit du 2026-07-25 (`docs/audit_features.md`,
+  section 1 "bugs et incohérences réels") : (1) `Combo.MatchMode` était un
+  réglage mort — le sélecteur "Strict / Tolérant" de `ComboEditorWindow` se
+  sauvegardait mais `ComboRunner.Feed` ne le lisait jamais, les deux options
+  se comportaient de façon identique (toujours tolérant au mouvement pur en
+  trop). `ComboRunner.Feed` fait maintenant réellement la différence : en
+  `Strict`, une direction tenue en plus de ce qui est demandé par l'étape
+  fait échouer la combo (comme un mauvais bouton d'action), pas en
+  `IgnoreExtraneous`. (2) La documentation de `ComboRunner` (section
+  `ComboRunner` ci-dessus + historique "Version 8") citait encore
+  `AttackRecoveryLockMs` (tolérance de récupération à 180ms) comme mécanisme
+  actif alors qu'il avait déjà été remplacé par `_lastConsumedActionKeys`
+  (tolérance sans notion de délai, basée sur l'identité du dernier bouton
+  validé) — doc corrigée pour refléter le code réel. (3) Une combo créée
+  manuellement dans `ComboEditorWindow` ne pouvait jamais être associée à une
+  arme (`Combo.Weapon` restait toujours vide hors import de preset), la
+  rendant invisible dès qu'un filtre d'arme était actif ailleurs — ajout d'un
+  sélecteur d'arme optionnel dans l'éditeur. (4) L'overlay était toujours
+  positionné sur `SystemParameters.WorkArea` (toujours l'écran principal
+  Windows) sans moyen de cibler un écran secondaire où tournerait le jeu —
+  ajout de `Settings.MonitorIndex` + sélecteur d'écran dans l'onglet
+  Apparence, résolu via `System.Windows.Forms.Screen.AllScreens`
+  (`MainWindow.GetTargetWorkArea`/`ApplyWorkArea`, appliqué aussi à chaud si
+  changé pendant que l'overlay tourne). (5) `SaveRecordedCombo` sauvegardait
+  la combo capturée par `Ctrl+Alt+R` directement dans `combos.json`, sans
+  écran de relecture (pourtant prévu dans `docs/plan.md §1.3.A`, jamais fait
+  jusque-là) — arrêter l'enregistrement ouvre maintenant `ComboEditorWindow`
+  pré-rempli avec les étapes capturées (mode `isRecordingReview`) avant toute
+  écriture sur disque, pour pouvoir corriger un input parasite ou ajuster une
+  tolérance avant de valider.
+- Remplacement complet des icônes du mode Tutoriel (retour utilisateur : le
+  pack `logo/`/`Assets/Icons/` d'origine — voir plus haut — mélangeait en fait
+  3-4 styles différents sans rapport entre eux, "immondes" une fois affiché en
+  contexte). Deux passes :
+  1. Une tentative de dessin maison (6 glyphes monoline vectoriels, un seul
+     poids de trait par famille) proposée en aperçu via un Artifact avant tout
+     code — rejetée elle aussi ("les formes elles-mêmes sont moches"), leçon
+     retenue : dessiner des icônes à la main n'est pas un point fort fiable
+     ici, mieux vaut partir d'un travail de designer existant.
+  2. Adoption de 6 icônes de **game-icons.net** (licence CC BY 3.0, attribution
+     ajoutée dans l'onglet À propos du panneau de contrôle) : *Saber Slash*
+     (Att. légère), *Sword Clash* (Att. forte), *Dodging* (Esquive), *Jump
+     Across* (Saut), *Thrown Daggers* (Lancer), tous par **Lorc**, et *Plain
+     Arrow* (Direction, tourne selon l'action) par **Delapouite** — toutes
+     issues de la même bibliothèque, donc cohérentes entre elles par
+     construction. Un premier choix (*Sword Slice* pour l'attaque légère) a
+     été rejeté après aperçu ("on dirait plutôt une parade") : sa silhouette
+     dominée par une forme ronde se lisait comme un bouclier plutôt qu'une
+     lame en mouvement — remplacé par *Saber Slash*, une lame nette en plein
+     geste.
+  Techniquement : les 18 PNG d'origine (3 couleurs × 6 icônes) sont retirés du
+  build (`<Resource Include="Assets\Icons\*.png" />` supprimé du `.csproj`) et
+  archivés (pas supprimés) dans `Assets/Icons/_archive_pack1/`. Les nouvelles
+  icônes sont des `Geometry` WPF (mini-langage compatible avec le `d` SVG
+  d'origine, collé quasi tel quel) dans `MainWindow.IconGeometryByBaseName`,
+  affichées via `System.Windows.Shapes.Path` avec `Stretch="Uniform"` (gère la
+  mise à l'échelle depuis le viewBox natif 512×512, pas de conversion de
+  coordonnées à la main) — recolorées à la volée par un simple changement de
+  `Fill` (`MainWindow.IconBrushForVariant`) au lieu de charger 3 fichiers par
+  icône. **Bug de contraste corrigé au passage** : l'état par défaut du pack
+  d'origine était un remplissage noir plein, quasi invisible sur le panneau
+  bleu-nuit translucide réel du mode Tutoriel — recoloré en accent doré de la
+  marque (`#E8C44A`, déjà la couleur de bordure du panneau) au lieu de noir.
+  `ActionIconRotationDegrees` recalculé en conséquence : la nouvelle icône de
+  direction (*Plain Arrow*) pointe vers le bas par défaut (l'ancienne
+  pointait à droite), donc `Bas=0°, Gauche=90°, Haut=180°, Droite=270°` au
+  lieu de l'ancien mapping.
 
 ## Pistes évoquées mais pas demandées/faites
 

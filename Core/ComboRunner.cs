@@ -30,10 +30,13 @@ public enum ComboFailReason
 ///   condition d'échec — le vrai jeu n'exige aucun rythme précis pour qu'une
 ///   combo touche. Ces champs ne servent qu'à la barre de tolérance visuelle.
 /// - Les touches de direction (Group == "Movement") tenues en plus de ce qui
-///   est demandé ne cassent jamais une étape : un joueur réel garde souvent
-///   une direction enfoncée en enchaînant (ex. tenir Droite en sautant), ce
-///   n'est pas une faute. Seules les touches d'action (Group == "Action")
-///   comptent pour juger si une étape est correcte.
+///   est demandé ne cassent une étape que si Combo.MatchMode == Strict — en
+///   IgnoreExtraneous (et c'était, par bug, aussi vrai en Strict avant ce
+///   correctif — voir docs/audit_features.md §1.1), un joueur réel garde
+///   souvent une direction enfoncée en enchaînant (ex. tenir Droite en
+///   sautant), ce n'est pas une faute. Les touches d'action (Group ==
+///   "Action") sont, elles, toujours jugées à l'identique quel que soit le
+///   MatchMode.
 /// - Un mash/double-clic du bouton qui vient tout juste de valider l'étape
 ///   précédente (ex. cliquer Saut 3 fois pour caler son timing) est ignoré au
 ///   lieu de casser l'étape suivante — on ne compare plus "exactement", on ne
@@ -95,7 +98,16 @@ public sealed class ComboRunner
 
         bool movementOk = requiredMovementNames.IsSubsetOf(pressedMovement);
 
-        if (movementOk && pressedAction.SetEquals(requiredAction))
+        // En mode Strict, une direction tenue en plus de ce qui est demandé compte
+        // aussi contre le joueur (pas seulement les boutons d'action) — c'est ce qui
+        // distingue réellement Strict de IgnoreExtraneous, qui lui ignore toujours le
+        // mouvement pur hors combo (comportement précédemment appliqué aux deux modes
+        // sans distinction, un bug signalé dans docs/audit_features.md §1.1).
+        var extraMovement = new HashSet<string>(pressedMovement);
+        extraMovement.ExceptWith(requiredMovementNames);
+        bool strictMovementViolation = Combo.MatchMode == MatchMode.Strict && extraMovement.Count > 0;
+
+        if (movementOk && !strictMovementViolation && pressedAction.SetEquals(requiredAction))
         {
             _lastConsumedActionKeys = requiredAction;
             State = ComboRunState.InProgress;
@@ -128,9 +140,27 @@ public sealed class ComboRunner
 
         // Rien d'inattendu : soit on est encore en train de construire l'étape (une
         // partie seulement des boutons requis est enfoncée, ou la direction requise
-        // manque encore), soit c'est du mouvement pur — jamais un échec.
-        if (wrongActions.Count == 0)
+        // manque encore), soit c'est du mouvement pur toléré (IgnoreExtraneous, ou
+        // Strict sans extra de mouvement) — jamais un échec dans ce cas.
+        if (wrongActions.Count == 0 && !strictMovementViolation)
         {
+            return;
+        }
+
+        // Un extra de mouvement en Strict est une faute à part entière, jamais
+        // toléré comme du mash (contrairement aux boutons d'action, tenir une
+        // direction en trop n'est pas un "réflexe de martelage").
+        if (strictMovementViolation)
+        {
+            if (CurrentStepIndex == 0) return;
+
+            StepFailed?.Invoke(CurrentStepIndex, ComboFailReason.WrongInput);
+            State = ComboRunState.Failed;
+            if (!KeepStreakOnFail) Streak = 0;
+            CurrentStepIndex = 0;
+            State = ComboRunState.Waiting;
+            _lastConsumedActionKeys = new HashSet<string>();
+            ComboReset?.Invoke();
             return;
         }
 

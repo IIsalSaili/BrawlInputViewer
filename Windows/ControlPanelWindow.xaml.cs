@@ -916,6 +916,30 @@ public partial class ControlPanelWindow : Window
 
         panel.Children.Add(HelpText("« Libre » est aussi choisi automatiquement dès que tu glisses le panneau à la souris en jeu (overlay déverrouillé)."));
 
+        panel.Children.Add(Label("Écran"));
+        var screens = System.Windows.Forms.Screen.AllScreens;
+        var screenItems = new List<string> { "Écran principal" };
+        for (var i = 0; i < screens.Length; i++)
+        {
+            var s = screens[i];
+            screenItems.Add($"Écran {i + 1} ({s.Bounds.Width}x{s.Bounds.Height}){(s.Primary ? " — principal" : "")}");
+        }
+        var screenCombo = new ComboBox
+        {
+            Width = 260,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            ItemsSource = screenItems,
+            SelectedIndex = AppState.Settings.MonitorIndex < 0 || AppState.Settings.MonitorIndex >= screens.Length ? 0 : AppState.Settings.MonitorIndex + 1,
+            Margin = new Thickness(0, 4, 0, 14),
+        };
+        screenCombo.SelectionChanged += (_, _) =>
+        {
+            AppState.Settings.MonitorIndex = screenCombo.SelectedIndex - 1;
+            AppState.SaveSettings();
+        };
+        panel.Children.Add(screenCombo);
+        panel.Children.Add(HelpText("Utile si Brawlhalla tourne sur un moniteur secondaire : sans ce réglage l'overlay reste toujours calé sur l'écran principal Windows."));
+
         panel.Children.Add(Label("Longueur de l'historique de coups"));
         var historySlider = new Slider { Minimum = 4, Maximum = 30, Value = AppState.Settings.MaxHistoryEntries, Width = 300, HorizontalAlignment = HorizontalAlignment.Left, TickFrequency = 1, IsSnapToTickEnabled = true };
         var historyValue = new TextBlock { Foreground = TextColor, Margin = new Thickness(10, 0, 0, 0), Text = $"{AppState.Settings.MaxHistoryEntries} lignes" };
@@ -960,6 +984,14 @@ public partial class ControlPanelWindow : Window
             row.Children.Add(new TextBlock { Text = desc, Foreground = SubtleText });
             panel.Children.Add(row);
         }
+
+        panel.Children.Add(new TextBlock { Text = "Icônes", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Icônes du mode Tutoriel par Lorc et Delapouite, sous licence CC BY 3.0. Disponibles sur game-icons.net.",
+            Foreground = SubtleText,
+            TextWrapping = TextWrapping.Wrap,
+        });
 
         return Wrap(panel);
     }
