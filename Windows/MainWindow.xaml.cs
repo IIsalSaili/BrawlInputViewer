@@ -11,6 +11,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace BrawlhallaOverlay;
@@ -120,6 +121,49 @@ public partial class MainWindow : Window
     private TextBlock _comboNameText = null!;
     private TextBlock _comboDamageNoteText = null!;
     private TextBlock _comboStreakText = null!;
+    private Image _legendPortraitImage = null!;
+
+    // Portrait officiel (render "Roster Pose" de brawlhalla.com/legends/) affiché en haut à
+    // gauche du panneau de combo (mode Tutoriel) quand Combo.Legend est renseigné — les fichiers
+    // sont embarqués dans Assets/Legends/<clé>.png (Resource dans le .csproj, chargés par pack
+    // URI comme les icônes d'action). Contrairement aux icônes d'action (game-icons.net, CC BY
+    // 3.0), ce sont des illustrations officielles du jeu, pas des assets sous licence libre — usage
+    // en lecture seule dans un outil 100% local et non redistribué, pas une republication. Clé =
+    // LegendComboPresets.Legends sans espace ; seuls les légends de cette liste (ceux qui ont au
+    // moins une combo Signature sourcée) ont un portrait, les autres légends du jeu n'en ont pas.
+    private static readonly Dictionary<string, string> LegendPortraitFileNames = new()
+    {
+        ["Ada"] = "Ada.png",
+        ["Asuri"] = "Asuri.png",
+        ["Azoth"] = "Azoth.png",
+        ["Barraza"] = "Barraza.png",
+        ["Bodvar"] = "Bodvar.png",
+        ["Cassidy"] = "Cassidy.png",
+        ["Cross"] = "Cross.png",
+        ["Diana"] = "Diana.png",
+        ["Ember"] = "Ember.png",
+        ["Isaiah"] = "Isaiah.png",
+        ["Jhala"] = "Jhala.png",
+        ["Jiro"] = "Jiro.png",
+        ["Koji"] = "Koji.png",
+        ["Kor"] = "Kor.png",
+        ["Lin Fei"] = "LinFei.png",
+        ["Mirage"] = "Mirage.png",
+        ["Mordex"] = "Mordex.png",
+        ["Queen Nai"] = "QueenNai.png",
+        ["Nix"] = "Nix.png",
+        ["Ragnir"] = "Ragnir.png",
+        ["Scarlet"] = "Scarlet.png",
+        ["Sentinel"] = "Sentinel.png",
+        ["Sidra"] = "Sidra.png",
+        ["Teros"] = "Teros.png",
+        ["Thatch"] = "Thatch.png",
+        ["Val"] = "Val.png",
+        ["Vraxx"] = "Vraxx.png",
+        ["Xull"] = "Xull.png",
+        ["Yumiko"] = "Yumiko.png",
+        ["Zariel"] = "Zariel.png",
+    };
     private ContentControl _historySlotMode1 = null!;
     private ContentControl _historySlotMode3 = null!;
     // Contenu d'une pastille : un StackPanel horizontal (icône image et/ou glyphe
@@ -203,6 +247,32 @@ public partial class MainWindow : Window
         "red" => IconBrushFail,
         _ => IconBrushDefault,
     };
+
+    /// <summary>Même Geometry/rotation que les pastilles du mode Tutoriel (ActionIconBaseNames/
+    /// IconGeometryByBaseName/ActionIconRotationDegrees), réutilisée pour les modes 1 et 2 — un
+    /// seul jeu d'icônes cohérent au lieu du glyphe Symbol (emoji) d'origine sur ces deux modes.
+    /// Renvoie null si l'action n'a pas d'icône dédiée (Taunt) : l'appelant garde alors son ancien
+    /// rendu texte/Symbol en repli.</summary>
+    private static System.Windows.Shapes.Path? BuildActionIconShape(string action, double size, Brush fill)
+    {
+        if (!ActionIconBaseNames.TryGetValue(action, out var baseName) || !IconGeometryByBaseName.TryGetValue(baseName, out var geometryData))
+            return null;
+
+        var shape = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse(geometryData),
+            Fill = fill,
+            Stretch = Stretch.Uniform,
+            Width = size,
+            Height = size,
+        };
+        if (ActionIconRotationDegrees.TryGetValue(action, out var rotation))
+        {
+            shape.RenderTransformOrigin = new Point(0.5, 0.5);
+            shape.RenderTransform = new RotateTransform(rotation);
+        }
+        return shape;
+    }
 
     private bool _quizRevealed;
     private DispatcherTimer? _quizRevealTimer;
@@ -458,9 +528,13 @@ public partial class MainWindow : Window
 
         // Le cluster ZQSD n'affiche que la lettre physique de la touche — sans
         // légende, rien n'indique que ce sont des directions (surtout pour qui
-        // ne connaît pas la convention clavier AZERTY). On ajoute donc le nom
-        // de l'action en petit sous la lettre pour ce groupe, plus un tooltip
+        // ne connaît pas la convention clavier AZERTY). On affiche donc la
+        // même icône de direction (tournée) que le mode Tutoriel sous la
+        // lettre pour ce groupe, à la place de l'ancien nom d'action en texte
+        // — cohérent avec les autres modes maintenant que ces icônes
+        // existent, plus tout de suite lisible qu'un mot. Tooltip conservé
         // sur tous les boutons pour la touche complète associée.
+        var movementIcon = bind.Group == "Movement" ? BuildActionIconShape(bind.Action, fontSize * 0.85, Brushes.White) : null;
         UIElement content = bind.Group == "Movement"
             ? new StackPanel
             {
@@ -476,24 +550,18 @@ public partial class MainWindow : Window
                         Foreground = Brushes.White,
                         HorizontalAlignment = HorizontalAlignment.Center,
                     },
-                    new TextBlock
-                    {
-                        Text = bind.Action,
-                        FontSize = fontSize * 0.45,
-                        Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                    },
+                    movementIcon is not null
+                        ? (UIElement)movementIcon
+                        : new TextBlock
+                        {
+                            Text = bind.Action,
+                            FontSize = fontSize * 0.45,
+                            Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                        },
                 },
             }
-            : new TextBlock
-            {
-                Text = bind.Label,
-                FontSize = fontSize,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
+            : BuildActionKeycapContent(bind, fontSize);
 
         return new Border
         {
@@ -507,6 +575,41 @@ public partial class MainWindow : Window
             ToolTip = $"{bind.Action} ({string.Join(" / ", bind.Keys)})",
             Child = content,
         };
+    }
+
+    /// <summary>Contenu d'un bouton d'action du mode 1 (Saut/Att. légère/Att. forte/Esquive/
+    /// Lancer) : icône dédiée (voir ActionIconBaseNames) suivie du nom de la touche physique
+    /// (bind.Label, ex. "Espace"), au lieu du seul texte d'origine — même jeu d'icônes que le
+    /// mode Tutoriel, pour une identité visuelle cohérente entre les modes. Repli en texte seul
+    /// pour une action sans icône dédiée (Taunt).</summary>
+    private UIElement BuildActionKeycapContent(KeyBind bind, double fontSize)
+    {
+        var icon = BuildActionIconShape(bind.Action, fontSize * 1.3, Brushes.White);
+        if (icon is null)
+        {
+            return new TextBlock
+            {
+                Text = bind.Label,
+                FontSize = fontSize,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+
+        icon.Margin = new Thickness(0, 0, 6, 0);
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        row.Children.Add(icon);
+        row.Children.Add(new TextBlock
+        {
+            Text = bind.Label,
+            FontSize = fontSize,
+            FontWeight = FontWeights.Bold,
+            Foreground = Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        return row;
     }
 
     private UIElement BuildHistoryContainer()
@@ -559,11 +662,33 @@ public partial class MainWindow : Window
         // non nul mais n'est jamais ajouté à l'arbre visuel ni alimenté (voir ApplyModeVisuals).
         _historySlotMode3 = new ContentControl();
 
-        var content = new StackPanel { Orientation = Orientation.Vertical };
-        content.Children.Add(_comboNameText);
-        content.Children.Add(_comboDamageNoteText);
-        content.Children.Add(_comboStepsPanel);
-        content.Children.Add(_comboStreakText);
+        var textContent = new StackPanel { Orientation = Orientation.Vertical };
+        textContent.Children.Add(_comboNameText);
+        textContent.Children.Add(_comboDamageNoteText);
+        textContent.Children.Add(_comboStepsPanel);
+        textContent.Children.Add(_comboStreakText);
+
+        // Portrait en colonne 0 (Auto, aligné en haut) : la colonne 1 (le reste du contenu,
+        // toujours centré comme avant) occupe l'espace restant, ce qui place naturellement le
+        // portrait en haut à gauche du panneau sans toucher au centrage existant.
+        _legendPortraitImage = new Image
+        {
+            Width = 48,
+            Height = 48,
+            Stretch = Stretch.UniformToFill,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 0, 12, 0),
+            Visibility = Visibility.Collapsed,
+            Clip = new RectangleGeometry(new Rect(0, 0, 48, 48), 8, 8),
+        };
+
+        var content = new Grid();
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(_legendPortraitImage, 0);
+        Grid.SetColumn(textContent, 1);
+        content.Children.Add(_legendPortraitImage);
+        content.Children.Add(textContent);
 
         var panel = new Border
         {
@@ -607,6 +732,7 @@ public partial class MainWindow : Window
             _comboNameText.Text = "Aucune combo — crée-en une (Ctrl+Alt+R ou le panneau de contrôle)";
             _comboStreakText.Text = "";
             _comboDamageNoteText.Visibility = Visibility.Collapsed;
+            _legendPortraitImage.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -615,6 +741,16 @@ public partial class MainWindow : Window
         var weaponTag = string.IsNullOrEmpty(combo.Weapon) ? "" : $"[{combo.Weapon}] ";
         _comboNameText.Text = $"{weaponTag}{combo.Name}  ({filteredPos + 1}/{filteredCount} · Ctrl+Alt+K pour changer)";
         _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
+
+        if (!string.IsNullOrEmpty(combo.Legend) && LegendPortraitFileNames.TryGetValue(combo.Legend, out var portraitFile))
+        {
+            _legendPortraitImage.Source = new BitmapImage(new Uri($"pack://application:,,,/Assets/Legends/{portraitFile}", UriKind.Absolute));
+            _legendPortraitImage.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            _legendPortraitImage.Visibility = Visibility.Collapsed;
+        }
 
         if (string.IsNullOrEmpty(combo.DamageNote))
         {
@@ -1165,6 +1301,20 @@ public partial class MainWindow : Window
 
         double size = fontSize * 1.55;
 
+        // Même icône de direction (tournée selon l'action) que le mode Tutoriel, à la place de
+        // l'ancien glyphe Symbol — les 4 badges sont toujours des directions (Gauche/Droite/Haut/
+        // Bas), donc BuildActionIconShape trouve toujours une icône ici (jamais de repli texte).
+        UIElement child = (UIElement?)BuildActionIconShape(bind.Action, fontSize * 0.75, Brushes.White)
+            ?? new TextBlock
+            {
+                Text = bind.Symbol,
+                FontSize = fontSize,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
         return new Border
         {
             Width = size,
@@ -1176,15 +1326,7 @@ public partial class MainWindow : Window
             HorizontalAlignment = h,
             VerticalAlignment = v,
             Margin = margin,
-            Child = new TextBlock
-            {
-                Text = bind.Symbol,
-                FontSize = fontSize,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
+            Child = child,
         };
     }
 
@@ -1199,14 +1341,18 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        content.Children.Add(new TextBlock
-        {
-            Text = bind.Symbol,
-            FontSize = fontSize,
-            FontWeight = FontWeights.Bold,
-            Foreground = Brushes.White,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        });
+        // Icône dédiée (mêmes formes que le mode Tutoriel) à la place du glyphe Symbol d'origine ;
+        // repli en Symbol pour Taunt, qui n'a pas d'icône (voir ActionIconBaseNames).
+        UIElement mainGlyph = (UIElement?)BuildActionIconShape(bind.Action, fontSize * 1.05, Brushes.White)
+            ?? new TextBlock
+            {
+                Text = bind.Symbol,
+                FontSize = fontSize,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+        content.Children.Add(mainGlyph);
         if (showLabel)
         {
             content.Children.Add(new TextBlock

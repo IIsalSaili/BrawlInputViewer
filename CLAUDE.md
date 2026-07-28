@@ -828,6 +828,38 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   directement au lieu de dupliquer la logique de filtre localement (c'est
   cette divergence entre deux implémentations du même filtre qui avait
   permis la combinaison arme/légend incohérente en premier lieu).
+- Portrait de personnage dans le panneau de combo (mode Tutoriel) + icônes de
+  touches cohérentes sur les modes 1/2 : demande de suite directe de la
+  refonte du sélecteur "Personnage" ci-dessus. `Assets/Legends/<Clé>.png`
+  (30 fichiers, un par légend de `LegendComboPresets.Legends`) contient les
+  renders "Roster Pose" officiels récupérés sur `brawlhalla.com/legends/`
+  (`cms.brawlhalla.com`, curl direct — `brawlhalla.fandom.com` a renvoyé 403
+  même en direct, pas seulement pour l'outil de fetch). **Différence
+  importante avec les icônes d'action (game-icons.net, CC BY 3.0)** : ce sont
+  des illustrations officielles du jeu, pas des assets sous licence libre —
+  utilisées ici en lecture seule dans un outil 100% local non redistribué,
+  jamais republiées. Déclarés `<Resource Include="Assets\Legends\*.png" />`
+  dans le `.csproj`, chargés par pack URI (`MainWindow.LegendPortraitFileNames`
+  fait le lien nom de légend → fichier). Affiché dans `BuildMode3Panel`
+  (`_legendPortraitImage`, 48×48, coins légèrement arrondis) en haut à gauche
+  du panneau de combo via une `Grid` à 2 colonnes (portrait en colonne Auto,
+  reste du contenu centré comme avant en colonne `*`) — masqué si
+  `Combo.Legend` est vide ou ne correspond à aucun fichier connu
+  (`RenderComboSteps`).
+  Au passage, mise à jour visuelle des modes 1 (Historique) et 2 (Grandes
+  flèches) pour utiliser le même jeu d'icônes vectorielles que le mode
+  Tutoriel (`IconGeometryByBaseName`/`ActionIconRotationDegrees`, jusque-là
+  réservé aux pastilles de combo) au lieu du glyphe `Symbol` (emoji) ou du
+  texte brut d'origine sur ces deux modes — nouvelle méthode partagée
+  `BuildActionIconShape` : `BuildKeycap` (mode 1, cluster ZQSD) affiche
+  l'icône de direction tournée à la place du nom d'action en petit texte,
+  les boutons d'action (Saut/Att. légère/Att. forte/Esquive/Lancer) affichent
+  icône + nom de touche au lieu du seul nom de touche
+  (`BuildActionKeycapContent`) ; `BuildBigArrow` (mode 2, badges de direction)
+  et `BuildBigKeycap` (mode 2, attaques + rangée d'icônes secondaires)
+  remplacent leur glyphe `Symbol` par la même icône. Repli sur l'ancien
+  rendu texte/Symbol pour Taunt (pas d'icône dédiée, comme dans le mode
+  Tutoriel).
 
 ## Pistes évoquées mais pas demandées/faites
 
