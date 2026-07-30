@@ -195,6 +195,7 @@ public partial class ComboEditorWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
 
         // Liste mutable des actions de cette étape, alimentée uniquement par des
@@ -266,8 +267,18 @@ public partial class ComboEditorWindow : Window
         Grid.SetColumn(minBox, 2);
         row.Children.Add(minBox);
 
+        var freeMovementBox = new CheckBox
+        {
+            IsChecked = step?.FreeMovement ?? false,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            ToolTip = "Tolère n'importe quelle direction tenue en plus sur cette étape, même en mode Strict (ex. un coup qui demande de se décaler pour toucher la hitbox)",
+        };
+        Grid.SetColumn(freeMovementBox, 3);
+        row.Children.Add(freeMovementBox);
+
         var removeBtn = new Button { Content = "✕", Margin = new Thickness(2) };
-        Grid.SetColumn(removeBtn, 3);
+        Grid.SetColumn(removeBtn, 4);
         removeBtn.Click += (_, _) => _stepsPanel.Children.Remove(row);
         row.Children.Add(removeBtn);
 
@@ -333,6 +344,7 @@ public partial class ComboEditorWindow : Window
 
             var maxBox = (TextBox)row.Children[1];
             var minBox = (TextBox)row.Children[2];
+            var freeMovementBox = (CheckBox)row.Children[3];
 
             // Les puces ne peuvent contenir que des actions réellement existantes
             // (ListenForNextBindAction les résout via KeyBind.VirtualKeyCodes), donc
@@ -354,6 +366,7 @@ public partial class ComboEditorWindow : Window
                 RequiredActions = new List<string>(actions),
                 MaxDelayMs = isFirstStep ? null : (int.TryParse(maxBox.Text, out var max) ? max : null),
                 MinDelayMs = isFirstStep ? null : (int.TryParse(minBox.Text, out var min) ? min : null),
+                FreeMovement = freeMovementBox.IsChecked ?? false,
             });
         }
 

@@ -25,7 +25,7 @@
   <ItemGroup>
     <!-- Portraits de légend (mode Tutoriel, coin haut-gauche du panneau de combo) —
          renders officiels récupérés sur brawlhalla.com/legends/, voir Config/LegendComboPresets.cs
-         et Windows/MainWindow.xaml.cs (LegendPortraitFileNames) pour le détail du sourcing. -->
+         et Windows/MainWindow.xaml.cs (LegendPortraitFileName) pour le détail du sourcing. -->
     <Resource Include="Assets\Legends\*.png" />
   </ItemGroup>
 

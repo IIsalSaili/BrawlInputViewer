@@ -36,6 +36,31 @@ Si une nouvelle session PowerShell ne trouve pas `dotnet`, rafraîchir le PATH :
 $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
 ```
 
+## Distribution (exe autonome pour un tiers)
+
+Le build normal ci-dessus (`dotnet build -c Release`) est *framework-dependent* :
+`bin\Release\net8.0-windows\BrawlhallaOverlay.exe` a besoin du runtime .NET 8
+Desktop installé sur la machine (present en dev, pas forcément ailleurs) et
+s'accompagne de 3 fichiers annexes obligatoires (`.dll`/`.deps.json`/
+`.runtimeconfig.json`) — pas un simple exe à copier seul.
+
+Pour donner l'app à quelqu'un sans lui demander d'installer .NET, publier en
+self-contained single-file :
+
+```powershell
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+```
+
+Produit un seul fichier `bin\Release\net8.0-windows\win-x64\publish\BrawlhallaOverlay.exe`
+(~73 Mo, runtime .NET embarqué) — c'est le seul fichier à distribuer (le
+`.pdb` à côté n'est que des symboles de debug, pas nécessaire). Aucune
+dépendance sur le reste du repo (images embarquées dans l'assembly via les
+`<Resource>` du `.csproj`) ni sur .NET installé côté destinataire. L'app
+régénère quand même `keybinds.json`/`combos.json`/`settings.json`/`stats.json`
+à côté de l'exe au premier lancement, comme d'habitude. Cette commande ne
+modifie pas le `.csproj` (pas de `RuntimeIdentifier` en dur) pour ne pas
+changer le chemin de sortie du build de dev habituel.
+
 ## Structure des dossiers
 
 Le code est rangé par rôle plutôt que d'avoir tous les fichiers en vrac à la
@@ -54,8 +79,9 @@ Config/    ComboConfig.cs, KeyBindConfig.cs, OverlaySettingsConfig.cs,
 Core/      AppState.cs (état partagé), KeyboardHook.cs (hook clavier bas niveau),
            GamepadHook.cs (polling manette XInput, même statut passif que le
            hook clavier), ComboRunner.cs (moteur de validation du mode Tutoriel)
-Windows/   MainWindow.xaml(.cs), ControlPanelWindow.xaml(.cs),
-           ComboEditorWindow.xaml(.cs) — les 3 fenêtres WPF
+Windows/   StartupWindow.xaml(.cs) (écran d'accueil, point d'entrée réel de
+           l'app), MainWindow.xaml(.cs), ControlPanelWindow.xaml(.cs),
+           ComboEditorWindow.xaml(.cs) — les 4 fenêtres WPF
 docs/      plan.md (doc de design du mode Tutoriel / refonte UI)
 ```
 
@@ -257,6 +283,30 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   AZERTY/QWERTY différent selon le PC, ou un jeu de touches distinct par
   contexte (solo/équipe). Les combos et l'apparence restent partagés entre
   profils (seules les touches changent).
+- **Windows/StartupWindow.xaml / .xaml.cs** — écran d'accueil, `StartupUri`
+  réel de `App.xaml` (remplace `MainWindow.xaml` à ce rôle depuis la Version
+  11, voir Historique). Fenêtre bordée classique (comme `ControlPanelWindow`,
+  même palette bleu-nuit/or), pas l'overlay in-game : sélecteur Personnage
+  (`LegendComboPresets.Legends`) → sous-filtre Arme dépendant du personnage
+  (même logique que `ControlPanelWindow.BuildCombosTab`, dupliquée ici plutôt
+  que partagée pour garder les deux fenêtres indépendantes — voir plus bas),
+  portrait du personnage choisi si connu (`Assets/Legends/<Nom>.png`), liste
+  des combos filtrées (`AppState.FilteredComboIndices`) avec en tête une
+  option « Aucune combo sélectionnée (juste l'overlay) », bouton d'import des
+  presets (`AppState.ImportCharacterPresets`/`ImportWeaponPresets`), et 3
+  boutons radio de mode (Historique/Grandes flèches/Tutoriel — sélectionner
+  une vraie combo dans la liste bascule automatiquement sur Tutoriel, seul
+  mode qui l'affiche). Bouton doré « Lancer en jeu » (seul bouton stylé hors
+  palette de boutons par défaut, pour bien le distinguer comme CTA
+  principal) : applique la combo/le mode choisis à `AppState` (`SetActiveCombo`,
+  `SetMode`, persistance dans `Settings.DefaultMode`), instancie `MainWindow`,
+  la pose comme `Application.Current.MainWindow` (nécessaire *avant* de fermer
+  cette fenêtre-ci, sinon `ShutdownMode="OnMainWindowClose"` tue l'app puisque
+  `StartupWindow` était jusque-là la `MainWindow` de l'`Application`), puis se
+  ferme. Bouton secondaire « Réglages avancés… » ouvre `ControlPanelWindow`
+  sans lancer l'overlay (utile pour retoucher touches/apparence avant de
+  lancer). Fermer cette fenêtre sans cliquer « Lancer en jeu » (croix native)
+  quitte l'app normalement, comme n'importe quelle `MainWindow` WPF.
 - **Windows/MainWindow.xaml / .xaml.cs** — la fenêtre overlay (in-game
   uniquement, aucune UI de configuration dedans — ça, c'est le rôle de
   `ControlPanelWindow`) :
@@ -839,8 +889,11 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   des illustrations officielles du jeu, pas des assets sous licence libre —
   utilisées ici en lecture seule dans un outil 100% local non redistribué,
   jamais republiées. Déclarés `<Resource Include="Assets\Legends\*.png" />`
-  dans le `.csproj`, chargés par pack URI (`MainWindow.LegendPortraitFileNames`
-  fait le lien nom de légend → fichier). Affiché dans `BuildMode3Panel`
+  dans le `.csproj`, chargés par pack URI (`MainWindow.LegendPortraitFileName`
+  dérive le nom de fichier depuis `LegendComboPresets.Legends`, seule source de
+  la liste des légends, plutôt qu'une seconde liste à maintenir en double ;
+  `_legendPortraitCache` évite de redécoder le PNG à chaque changement de
+  combo). Affiché dans `BuildMode3Panel`
   (`_legendPortraitImage`, 48×48, coins légèrement arrondis) en haut à gauche
   du panneau de combo via une `Grid` à 2 colonnes (portrait en colonne Auto,
   reste du contenu centré comme avant en colonne `*`) — masqué si
@@ -860,6 +913,29 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   remplacent leur glyphe `Symbol` par la même icône. Repli sur l'ancien
   rendu texte/Symbol pour Taunt (pas d'icône dédiée, comme dans le mode
   Tutoriel).
+- Version 11 (écran d'accueil) : retour utilisateur que lancer l'app droit sur
+  l'overlay (`App.xaml` avait `StartupUri="Windows/MainWindow.xaml"` depuis le
+  tout début du projet) était contre-intuitif — un premier utilisateur se
+  retrouvait face à un overlay click-through sans aucune UI de sélection, sans
+  savoir qu'un panneau de contrôle existait ailleurs. Demande explicite : tout
+  sélectionner (personnage/arme/combo/mode) *avant*, puis n'avoir l'overlay
+  qu'une fois en jeu. Ajout de `Windows/StartupWindow.xaml(.cs)`, nouveau
+  `StartupUri` de `App.xaml` — voir la section `StartupWindow` ci-dessus pour
+  le détail. Point technique notable : `ShutdownMode="OnMainWindowClose"`
+  (inchangé) suit la propriété `Application.MainWindow`, qui pointe par
+  défaut sur la première fenêtre du `StartupUri` (donc `StartupWindow`) tant
+  que rien ne la réassigne — `LaunchOverlay()` doit explicitement faire
+  `Application.Current.MainWindow = overlay` *avant* de fermer `StartupWindow`,
+  sinon fermer l'accueil après avoir lancé l'overlay ferme l'app entière avec.
+  Le sélecteur Personnage/Arme/combo de cet écran réutilise directement l'API
+  `AppState` existante (`FilteredComboIndices`, `SetTrainingLegendFilter`,
+  `ImportCharacterPresets`...) déjà éprouvée par l'onglet Combos du panneau de
+  contrôle — même logique de filtre dupliquée dans les deux fenêtres plutôt
+  que factorisée, choix délibéré pour garder `StartupWindow` et
+  `ControlPanelWindow` indépendantes (l'une n'a pas besoin d'exister pour que
+  l'autre fonctionne). Le bouton « Réglages avancés » de l'accueil ouvre
+  `ControlPanelWindow` directement (sans lancer l'overlay), pour le cas où
+  l'utilisateur veut retoucher touches/apparence avant de rentrer en jeu.
 
 ## Pistes évoquées mais pas demandées/faites
 

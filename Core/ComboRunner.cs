@@ -36,12 +36,16 @@ public enum ComboFailReason
 ///   souvent une direction enfoncée en enchaînant (ex. tenir Droite en
 ///   sautant), ce n'est pas une faute. Les touches d'action (Group ==
 ///   "Action") sont, elles, toujours jugées à l'identique quel que soit le
-///   MatchMode.
-/// - Un mash/double-clic du bouton qui vient tout juste de valider l'étape
-///   précédente (ex. cliquer Saut 3 fois pour caler son timing) est ignoré au
-///   lieu de casser l'étape suivante — on ne compare plus "exactement", on ne
-///   fail que sur un bouton d'action réellement différent de ce qui est
-///   attendu et de ce qui vient d'être validé.
+///   MatchMode. ComboStep.FreeMovement tolère cet excédent de direction sur
+///   une étape précise même en Strict (ex. un coup qui demande de se décaler
+///   pour toucher la hitbox, sans que ce décalage fasse partie de la combo).
+/// - Un mash/double-clic/chevauchement du bouton qui vient tout juste de
+///   valider l'étape précédente (ex. cliquer Saut 3 fois pour caler son
+///   timing, ou retaper la touche suivante avant d'avoir complètement
+///   relâché la précédente — le move est déjà lancé en jeu, retaper dessus
+///   ne fait rien) est ignoré au lieu de casser l'étape suivante : on ne
+///   fail que si le résidu inattendu contient autre chose que ce dernier
+///   bouton validé (IsSubsetOf, pas une égalité stricte).
 ///
 /// No UI, no keyboard hook — testable independently.
 /// </summary>
@@ -94,6 +98,7 @@ public sealed class ComboRunner
             .Where(b => b.Group == "Movement").Select(b => b.Action));
         var pressedAction = new HashSet<string>(pressedBindsThisTick
             .Where(b => b.Group != "Movement").Select(b => b.Action));
+
         var (requiredMovementNames, requiredAction) = SplitByMovement(required, pressedBindsThisTick);
 
         bool movementOk = requiredMovementNames.IsSubsetOf(pressedMovement);
@@ -103,9 +108,14 @@ public sealed class ComboRunner
         // distingue réellement Strict de IgnoreExtraneous, qui lui ignore toujours le
         // mouvement pur hors combo (comportement précédemment appliqué aux deux modes
         // sans distinction, un bug signalé dans docs/audit_features.md §1.1).
+        // ComboStep.FreeMovement permet de tolérer ce même excédent sur une étape
+        // précise même en Strict (ex. un coup qui demande de se décaler pour toucher
+        // la hitbox, sans que ce décalage fasse partie de la combo elle-même).
         var extraMovement = new HashSet<string>(pressedMovement);
         extraMovement.ExceptWith(requiredMovementNames);
-        bool strictMovementViolation = Combo.MatchMode == MatchMode.Strict && extraMovement.Count > 0;
+        bool strictMovementViolation = Combo.MatchMode == MatchMode.Strict
+            && !step.FreeMovement
+            && extraMovement.Count > 0;
 
         if (movementOk && !strictMovementViolation && pressedAction.SetEquals(requiredAction))
         {
@@ -175,10 +185,14 @@ public sealed class ComboRunner
         var (_, firstRequiredAction) = SplitByMovement(firstRequired, pressedBindsThisTick);
         bool firstStepInputRecurring = CurrentStepIndex != 0 && wrongActions.SetEquals(firstRequiredAction);
 
-        // Mash/répétition du bouton qui vient de valider l'étape précédente (ex. cliquer
-        // Saut 3 fois pour caler son timing) : on l'ignore au lieu de casser la suite,
-        // ce n'est pas un vrai mauvais input, juste un joueur qui n'est pas une machine.
-        if (!firstStepInputRecurring && wrongActions.SetEquals(_lastConsumedActionKeys))
+        // Mash/répétition/chevauchement du bouton qui vient de valider l'étape précédente
+        // (ex. cliquer Saut 3 fois pour caler son timing, ou retaper la touche suivante
+        // avant d'avoir complètement relâché la précédente — le move est déjà lancé en
+        // jeu, donc retaper dessus ne fait rien) : on l'ignore au lieu de casser la suite.
+        // IsSubsetOf (pas SetEquals) tolère aussi le cas où SEULE une partie de l'excédent
+        // est ce résidu — le reste (une vraie touche inattendue) fait toujours échouer,
+        // seul le résidu du bouton précédent est transparent.
+        if (!firstStepInputRecurring && wrongActions.IsSubsetOf(_lastConsumedActionKeys))
         {
             return;
         }

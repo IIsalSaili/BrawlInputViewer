@@ -125,45 +125,15 @@ public partial class MainWindow : Window
 
     // Portrait officiel (render "Roster Pose" de brawlhalla.com/legends/) affiché en haut à
     // gauche du panneau de combo (mode Tutoriel) quand Combo.Legend est renseigné — les fichiers
-    // sont embarqués dans Assets/Legends/<clé>.png (Resource dans le .csproj, chargés par pack
-    // URI comme les icônes d'action). Contrairement aux icônes d'action (game-icons.net, CC BY
-    // 3.0), ce sont des illustrations officielles du jeu, pas des assets sous licence libre — usage
-    // en lecture seule dans un outil 100% local et non redistribué, pas une republication. Clé =
-    // LegendComboPresets.Legends sans espace ; seuls les légends de cette liste (ceux qui ont au
-    // moins une combo Signature sourcée) ont un portrait, les autres légends du jeu n'en ont pas.
-    private static readonly Dictionary<string, string> LegendPortraitFileNames = new()
-    {
-        ["Ada"] = "Ada.png",
-        ["Asuri"] = "Asuri.png",
-        ["Azoth"] = "Azoth.png",
-        ["Barraza"] = "Barraza.png",
-        ["Bodvar"] = "Bodvar.png",
-        ["Cassidy"] = "Cassidy.png",
-        ["Cross"] = "Cross.png",
-        ["Diana"] = "Diana.png",
-        ["Ember"] = "Ember.png",
-        ["Isaiah"] = "Isaiah.png",
-        ["Jhala"] = "Jhala.png",
-        ["Jiro"] = "Jiro.png",
-        ["Koji"] = "Koji.png",
-        ["Kor"] = "Kor.png",
-        ["Lin Fei"] = "LinFei.png",
-        ["Mirage"] = "Mirage.png",
-        ["Mordex"] = "Mordex.png",
-        ["Queen Nai"] = "QueenNai.png",
-        ["Nix"] = "Nix.png",
-        ["Ragnir"] = "Ragnir.png",
-        ["Scarlet"] = "Scarlet.png",
-        ["Sentinel"] = "Sentinel.png",
-        ["Sidra"] = "Sidra.png",
-        ["Teros"] = "Teros.png",
-        ["Thatch"] = "Thatch.png",
-        ["Val"] = "Val.png",
-        ["Vraxx"] = "Vraxx.png",
-        ["Xull"] = "Xull.png",
-        ["Yumiko"] = "Yumiko.png",
-        ["Zariel"] = "Zariel.png",
-    };
+    // sont embarqués dans Assets/Legends/<clé sans espace>.png (Resource dans le .csproj, chargés
+    // par pack URI comme les icônes d'action). Contrairement aux icônes d'action (game-icons.net,
+    // CC BY 3.0), ce sont des illustrations officielles du jeu, pas des assets sous licence libre —
+    // usage en lecture seule dans un outil 100% local et non redistribué, pas une republication.
+    // Nom de fichier dérivé de LegendComboPresets.Legends (source unique de la liste des légends)
+    // plutôt qu'une seconde liste à maintenir en double : seuls les légends de cette liste (ceux
+    // qui ont au moins une combo Signature sourcée) ont un portrait.
+    private static string LegendPortraitFileName(string legend) => legend.Replace(" ", "") + ".png";
+    private static readonly Dictionary<string, BitmapImage> _legendPortraitCache = new();
     private ContentControl _historySlotMode1 = null!;
     private ContentControl _historySlotMode3 = null!;
     // Contenu d'une pastille : un StackPanel horizontal (icône image et/ou glyphe
@@ -272,6 +242,26 @@ public partial class MainWindow : Window
             shape.RenderTransform = new RotateTransform(rotation);
         }
         return shape;
+    }
+
+    /// <summary>Icône dédiée pour <paramref name="bind"/>, ou repli sur son glyphe <c>Symbol</c>
+    /// (emoji d'origine) si l'action n'en a pas (Taunt) — factorise le repli identique répété dans
+    /// les modes 1/2 (BuildBigArrow, BuildBigKeycap).</summary>
+    private static UIElement BuildActionIconOrSymbolFallback(KeyBind bind, double iconSize, double fallbackFontSize, bool centerVertical = false)
+    {
+        var icon = BuildActionIconShape(bind.Action, iconSize, Brushes.White);
+        if (icon is not null) return icon;
+
+        var fallback = new TextBlock
+        {
+            Text = bind.Symbol,
+            FontSize = fallbackFontSize,
+            FontWeight = FontWeights.Bold,
+            Foreground = Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        if (centerVertical) fallback.VerticalAlignment = VerticalAlignment.Center;
+        return fallback;
     }
 
     private bool _quizRevealed;
@@ -742,9 +732,15 @@ public partial class MainWindow : Window
         _comboNameText.Text = $"{weaponTag}{combo.Name}  ({filteredPos + 1}/{filteredCount} · Ctrl+Alt+K pour changer)";
         _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
 
-        if (!string.IsNullOrEmpty(combo.Legend) && LegendPortraitFileNames.TryGetValue(combo.Legend, out var portraitFile))
+        if (!string.IsNullOrEmpty(combo.Legend) && LegendComboPresets.Legends.Contains(combo.Legend))
         {
-            _legendPortraitImage.Source = new BitmapImage(new Uri($"pack://application:,,,/Assets/Legends/{portraitFile}", UriKind.Absolute));
+            var portraitFile = LegendPortraitFileName(combo.Legend);
+            if (!_legendPortraitCache.TryGetValue(portraitFile, out var portrait))
+            {
+                portrait = new BitmapImage(new Uri($"pack://application:,,,/Assets/Legends/{portraitFile}", UriKind.Absolute));
+                _legendPortraitCache[portraitFile] = portrait;
+            }
+            _legendPortraitImage.Source = portrait;
             _legendPortraitImage.Visibility = Visibility.Visible;
         }
         else
@@ -1304,16 +1300,7 @@ public partial class MainWindow : Window
         // Même icône de direction (tournée selon l'action) que le mode Tutoriel, à la place de
         // l'ancien glyphe Symbol — les 4 badges sont toujours des directions (Gauche/Droite/Haut/
         // Bas), donc BuildActionIconShape trouve toujours une icône ici (jamais de repli texte).
-        UIElement child = (UIElement?)BuildActionIconShape(bind.Action, fontSize * 0.75, Brushes.White)
-            ?? new TextBlock
-            {
-                Text = bind.Symbol,
-                FontSize = fontSize,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
+        UIElement child = BuildActionIconOrSymbolFallback(bind, fontSize * 0.75, fontSize, centerVertical: true);
 
         return new Border
         {
@@ -1343,16 +1330,7 @@ public partial class MainWindow : Window
         };
         // Icône dédiée (mêmes formes que le mode Tutoriel) à la place du glyphe Symbol d'origine ;
         // repli en Symbol pour Taunt, qui n'a pas d'icône (voir ActionIconBaseNames).
-        UIElement mainGlyph = (UIElement?)BuildActionIconShape(bind.Action, fontSize * 1.05, Brushes.White)
-            ?? new TextBlock
-            {
-                Text = bind.Symbol,
-                FontSize = fontSize,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-            };
-        content.Children.Add(mainGlyph);
+        content.Children.Add(BuildActionIconOrSymbolFallback(bind, fontSize * 1.05, fontSize));
         if (showLabel)
         {
             content.Children.Add(new TextBlock
