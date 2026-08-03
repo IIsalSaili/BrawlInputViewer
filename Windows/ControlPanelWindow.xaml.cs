@@ -868,10 +868,11 @@ public partial class ControlPanelWindow : Window
         // Réutilise le même calcul que AppState.CycleCombo/ActiveComboFilteredPosition au lieu de
         // ré-implémenter la logique de filtre ici — sinon les deux finissent par diverger (c'est
         // exactement ce qui s'était passé avec l'ancien ET arme/légend indépendant).
-        foreach (var i in AppState.FilteredComboIndices())
+        var filteredAbsIndices = AppState.FilteredComboIndices();
+        foreach (var absIndex in ComboFamilies.OrderWithFamilies(filteredAbsIndices, i => AppState.Combos[i]))
         {
-            var combo = AppState.Combos[i];
-            _visibleComboIndices.Add(i);
+            var combo = AppState.Combos[absIndex.Index];
+            _visibleComboIndices.Add(absIndex.Index);
             var legendTag = string.IsNullOrEmpty(combo.Legend) ? "" : $"{combo.Legend} ";
             var weaponTag = string.IsNullOrEmpty(combo.Weapon) ? "" : $"[{legendTag}{combo.Weapon}] ";
             var masteredMark = combo.Mastered ? " ✓" : "";
@@ -879,7 +880,10 @@ public partial class ControlPanelWindow : Window
                 ? $" — meilleure série {combo.BestStreak}, {combo.TotalCompletions}/{combo.TotalAttempts} réussie(s)"
                 : "";
             var damageNote = string.IsNullOrEmpty(combo.DamageNote) ? "" : $"  ⚠ {combo.DamageNote}";
-            _combosList.Items.Add($"{weaponTag}{combo.Name}{masteredMark}  ({combo.Steps.Count} étapes){perf}{damageNote}");
+            var indent = absIndex.Level > 1 ? new string(' ', (absIndex.Level - 1) * 3) + "↳ " : "";
+            var levelTag = absIndex.Level > 0 && absIndex.FamilySize > 1 ? $" [Niveau {absIndex.Level}]" : "";
+            var followUpHint = combo.Mastered && absIndex.HasFollowUp ? "  → niveau supérieur disponible ci-dessous" : "";
+            _combosList.Items.Add($"{indent}{weaponTag}{combo.Name}{masteredMark}{levelTag}  ({combo.Steps.Count} étapes){perf}{damageNote}{followUpHint}");
         }
 
         if (_combosList.Items.Count == 0)

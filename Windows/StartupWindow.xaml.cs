@@ -335,13 +335,18 @@ public partial class StartupWindow : Window
         _combosList.Items.Add("— Aucune combo sélectionnée (juste l'overlay) —");
         _visibleIndices.Add(-1);
 
-        foreach (var i in AppState.FilteredComboIndices())
+        var filteredAbsIndices = AppState.FilteredComboIndices();
+        foreach (var ordered in ComboFamilies.OrderWithFamilies(filteredAbsIndices, i => AppState.Combos[i]))
         {
-            var combo = AppState.Combos[i];
-            _visibleIndices.Add(i);
+            var combo = AppState.Combos[ordered.Index];
+            _visibleIndices.Add(ordered.Index);
             var legendTag = string.IsNullOrEmpty(combo.Legend) ? "" : $"{combo.Legend} ";
             var weaponTag = string.IsNullOrEmpty(combo.Weapon) ? "" : $"[{legendTag}{combo.Weapon}] ";
-            _combosList.Items.Add($"{weaponTag}{combo.Name}  ({combo.Steps.Count} étapes)");
+            var masteredMark = combo.Mastered ? " ✓" : "";
+            var indent = ordered.Level > 1 ? new string(' ', (ordered.Level - 1) * 3) + "↳ " : "";
+            var levelTag = ordered.Level > 0 && ordered.FamilySize > 1 ? $" [Niveau {ordered.Level}]" : "";
+            var followUpHint = combo.Mastered && ordered.HasFollowUp ? "  → niveau supérieur disponible ci-dessous" : "";
+            _combosList.Items.Add($"{indent}{weaponTag}{combo.Name}{masteredMark}{levelTag}  ({combo.Steps.Count} étapes){followUpHint}");
         }
 
         var restored = _visibleIndices.IndexOf(previouslySelected);

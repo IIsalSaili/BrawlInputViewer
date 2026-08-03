@@ -46,6 +46,20 @@ public enum ComboFailReason
 ///   ne fait rien) est ignoré au lieu de casser l'étape suivante : on ne
 ///   fail que si le résidu inattendu contient autre chose que ce dernier
 ///   bouton validé (IsSubsetOf, pas une égalité stricte).
+/// - Une étape qui demande "Saut" tolère toujours une direction tenue en plus
+///   (sauter en bougeant est normal en jeu), même en MatchMode.Strict et sans
+///   que ComboStep.FreeMovement soit coché — pas besoin de le configurer à la
+///   main pour chaque étape de saut, voir requiresJump ci-dessous.
+/// - Gauche/Droite d'une combo sont symétriques : la 1ère fois qu'une étape
+///   exige une direction gauche/droite alors que le joueur presse l'opposée
+///   (et que le reste de l'étape correspond), toute la tentative en cours
+///   bascule en "miroir" (_mirroredDirections) — attendre l'opposé de ce que
+///   Combo.Steps décrit pour Gauche/Droite jusqu'à la fin de la tentative. Une
+///   combo pensée "vers la droite" doit donc marcher identiquement jouée
+///   "vers la gauche" sans avoir à la dupliquer. Haut/Bas ne sont jamais
+///   inversés (l'orientation gauche/droite du joueur ne les affecte pas).
+///   Verrouillé une seule fois par tentative (voir UpdateMirrorLock), remis à
+///   zéro à chaque retour à l'étape 0 (échec, abandon, ou succès complet).
 ///
 /// No UI, no keyboard hook — testable independently.
 /// </summary>
@@ -58,11 +72,21 @@ public sealed class ComboRunner
     /// <summary>Number of consecutive full-combo completions since the last failure.</summary>
     public int Streak { get; private set; }
 
+    /// <summary>True si cette tentative a été détectée comme jouée en miroir
+    /// (Gauche/Droite inversés par rapport à Combo.Steps) — voir docstring de classe.</summary>
+    public bool IsMirrored => _mirroredDirections == true;
+
     public event Action<int>? StepSucceeded;
     public event Action<int, ComboFailReason>? StepFailed;
     public event Action? ComboCompleted;
     public event Action? ComboReset;
     public event Action? ComboAbandoned;
+
+    /// <summary>Levé chaque fois que IsMirrored est (re)déterminé : passage à true dès
+    /// qu'une direction opposée est détectée, et repassage à false à chaque retour à
+    /// l'étape 0 (échec/abandon/succès) pour que l'UI désinverse ses flèches avant la
+    /// tentative suivante. Sert à l'UI pour inverser l'affichage des flèches de direction.</summary>
+    public event Action<bool>? MirrorChanged;
 
     /// <summary>Dernier instant où Feed a été appelé — sert uniquement à
     /// CheckAbandon (voir plus bas), pas à juger une étape.</summary>
@@ -72,6 +96,10 @@ public sealed class ComboRunner
     /// Sert uniquement à tolérer un mash/répétition du même bouton juste après (voir
     /// docstring de classe) — pas une histoire de délai, juste un état mémorisé.</summary>
     private HashSet<string> _lastConsumedActionKeys = new();
+
+    /// <summary>Null tant que l'orientation n'a pas encore été déterminée pour la
+    /// tentative en cours ; true/false une fois verrouillée (voir docstring de classe).</summary>
+    private bool? _mirroredDirections;
 
     /// <summary>If true, a failed combo keeps its Streak instead of resetting to 0.</summary>
     public bool KeepStreakOnFail { get; set; }
@@ -101,7 +129,15 @@ public sealed class ComboRunner
 
         var (requiredMovementNames, requiredAction) = SplitByMovement(required, pressedBindsThisTick);
 
-        bool movementOk = requiredMovementNames.IsSubsetOf(pressedMovement);
+        // Verrouille (une seule fois par tentative) si cette étape se joue en miroir —
+        // voir docstring de classe. Doit tourner avant toute comparaison de mouvement
+        // ci-dessous pour que l'étape courante valide déjà avec l'orientation détectée.
+        UpdateMirrorLock(requiredMovementNames, pressedMovement);
+        var effectiveRequiredMovement = _mirroredDirections == true
+            ? MirrorMovementNames(requiredMovementNames)
+            : requiredMovementNames;
+
+        bool movementOk = effectiveRequiredMovement.IsSubsetOf(pressedMovement);
 
         // En mode Strict, une direction tenue en plus de ce qui est demandé compte
         // aussi contre le joueur (pas seulement les boutons d'action) — c'est ce qui
@@ -112,9 +148,16 @@ public sealed class ComboRunner
         // précise même en Strict (ex. un coup qui demande de se décaler pour toucher
         // la hitbox, sans que ce décalage fasse partie de la combo elle-même).
         var extraMovement = new HashSet<string>(pressedMovement);
-        extraMovement.ExceptWith(requiredMovementNames);
+        extraMovement.ExceptWith(effectiveRequiredMovement);
+
+        // Sauter tient presque toujours une direction en même temps en jeu (bouger en
+        // l'air) — jamais une faute, quel que soit MatchMode, sans avoir à cocher
+        // FreeMovement à la main sur chaque étape de saut.
+        bool requiresJump = requiredAction.Contains("Saut");
+
         bool strictMovementViolation = Combo.MatchMode == MatchMode.Strict
             && !step.FreeMovement
+            && !requiresJump
             && extraMovement.Count > 0;
 
         if (movementOk && !strictMovementViolation && pressedAction.SetEquals(requiredAction))
@@ -139,6 +182,7 @@ public sealed class ComboRunner
                 ComboCompleted?.Invoke();
                 CurrentStepIndex = 0;
                 State = ComboRunState.Waiting;
+                ResetMirrorState();
             }
 
             return;
@@ -170,6 +214,7 @@ public sealed class ComboRunner
             CurrentStepIndex = 0;
             State = ComboRunState.Waiting;
             _lastConsumedActionKeys = new HashSet<string>();
+            ResetMirrorState();
             ComboReset?.Invoke();
             return;
         }
@@ -209,7 +254,63 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
+        ResetMirrorState();
         ComboReset?.Invoke();
+    }
+
+    /// <summary>Actions de direction qui ont un opposé gauche/droite (Haut/Bas ne sont
+    /// jamais inversés — l'orientation gauche/droite du joueur ne les affecte pas).</summary>
+    private static readonly Dictionary<string, string> DirectionOpposite = new()
+    {
+        ["Gauche"] = "Droite",
+        ["Droite"] = "Gauche",
+    };
+
+    private static HashSet<string> MirrorMovementNames(HashSet<string> names)
+    {
+        var result = new HashSet<string>();
+        foreach (var n in names)
+        {
+            result.Add(DirectionOpposite.TryGetValue(n, out var opposite) ? opposite : n);
+        }
+        return result;
+    }
+
+    /// <summary>Verrouille _mirroredDirections dès que le joueur presse l'opposé exact
+    /// d'une direction gauche/droite requise (et rien qu'elle) — une seule fois par
+    /// tentative, voir docstring de classe. Ne fait rien tant que l'étape en cours ne
+    /// requiert aucune direction gauche/droite (Haut/Bas seuls ne peuvent pas déterminer
+    /// l'orientation) ou si l'orientation est déjà verrouillée.</summary>
+    private void UpdateMirrorLock(HashSet<string> requiredMovementNames, HashSet<string> pressedMovement)
+    {
+        if (_mirroredDirections.HasValue) return;
+        if (!requiredMovementNames.Any(n => DirectionOpposite.ContainsKey(n))) return;
+
+        var mirrored = MirrorMovementNames(requiredMovementNames);
+        bool matchesNormal = requiredMovementNames.IsSubsetOf(pressedMovement);
+        bool matchesMirrored = mirrored.IsSubsetOf(pressedMovement);
+
+        if (matchesMirrored && !matchesNormal)
+        {
+            _mirroredDirections = true;
+            MirrorChanged?.Invoke(true);
+        }
+        else if (matchesNormal)
+        {
+            _mirroredDirections = false;
+        }
+        // Sinon : encore en train de construire l'étape (aucune des deux orientations
+        // n'est encore confirmée), on retente au prochain Feed.
+    }
+
+    /// <summary>Remet l'orientation à "non déterminée" pour la prochaine tentative, et
+    /// notifie l'UI si elle affichait des flèches inversées, pour qu'elle redevienne
+    /// normale avant que la tentative suivante ne (re)détecte une éventuelle inversion.</summary>
+    private void ResetMirrorState()
+    {
+        var wasMirrored = _mirroredDirections == true;
+        _mirroredDirections = null;
+        if (wasMirrored) MirrorChanged?.Invoke(false);
     }
 
     /// <summary>Sépare un ensemble d'actions requises en (directions, boutons d'action),
@@ -237,6 +338,7 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
+        ResetMirrorState();
     }
 
     /// <summary>Appelé périodiquement (polling, pas à chaque input) pour abandonner
@@ -254,6 +356,7 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
+        ResetMirrorState();
         ComboAbandoned?.Invoke();
     }
 }

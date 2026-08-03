@@ -78,7 +78,9 @@ Config/    ComboConfig.cs, KeyBindConfig.cs, OverlaySettingsConfig.cs,
            Architecture)
 Core/      AppState.cs (état partagé), KeyboardHook.cs (hook clavier bas niveau),
            GamepadHook.cs (polling manette XInput, même statut passif que le
-           hook clavier), ComboRunner.cs (moteur de validation du mode Tutoriel)
+           hook clavier), ComboRunner.cs (moteur de validation du mode Tutoriel),
+           ComboFamilies.cs (détection/affichage groupé des combos qui
+           s'étendent les unes les autres, voir Architecture)
 Windows/   StartupWindow.xaml(.cs) (écran d'accueil, point d'entrée réel de
            l'app), MainWindow.xaml(.cs), ControlPanelWindow.xaml(.cs),
            ComboEditorWindow.xaml(.cs) — les 4 fenêtres WPF
@@ -173,6 +175,26 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   mauvaise touche fait échouer la combo. `ComboFailReason.Timeout` reste dans
   l'enum pour compat (chargement de vieux combos.json / mapping couleur UI)
   mais n'est plus jamais levé.
+- **Core/ComboFamilies.cs** — regroupement purement calculé (rien de persisté
+  dans `combos.json`) des combos qui sont l'extension stricte d'une autre
+  (mêmes `Weapon`/`Legend`, mêmes premières étapes dans le même ordre, plus
+  au moins une étape de plus à la fin — comparaison par ensemble
+  `RequiredActions` par étape, `FreeMovement`/délais ignorés). Sert
+  uniquement à l'affichage groupé/indenté dans les listes de combos
+  (`ControlPanelWindow`/`StartupWindow`, via `ComboFamilies.OrderWithFamilies`,
+  factorisé pour que les deux fenêtres partagent la même logique de tri sans
+  la dupliquer) : les membres d'une famille se retrouvent adjacents, triés
+  par nombre d'étapes croissant (`Niveau 1`, `Niveau 2`...), avec un badge de
+  niveau et, pour une combo `Mastered` qui a une extension, un indice textuel
+  (`→ niveau supérieur disponible ci-dessous`). Volontairement pas de bascule
+  automatique de combo active à la maîtrise du niveau courant — décision
+  explicite de l'utilisateur (voir `docs/combo_families_plan.md`) : l'indice
+  est une suggestion, le changement de niveau reste toujours un clic manuel
+  dans la liste. Ne modifie ni `ComboRunner` (chaque combo reste une séquence
+  autonome validée indépendamment) ni `ChainCombos`/`ChainStreakThreshold`
+  (playlist qui cycle toute la liste filtrée, système séparé et inchangé) ;
+  aucun nouveau champ sur `Combo`, donc aucune régénération de schéma
+  `combos.json` nécessaire.
 - **Models/ActionStat.cs / Config/StatsConfig.cs** — compteurs cumulés
   (`Successes`/`Failures`) par action, alimentés à chaque étape de combo
   réussie/ratée (mode Tutoriel), persistés dans `stats.json`, consultables via
@@ -936,6 +958,48 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   l'autre fonctionne). Le bouton « Réglages avancés » de l'accueil ouvre
   `ControlPanelWindow` directement (sans lancer l'overlay), pour le cas où
   l'utilisateur veut retoucher touches/apparence avant de rentrer en jeu.
+- Version 12 (familles de combos) : retour utilisateur qu'une combo courte
+  (ex. 2 étapes) et une combo plus longue qui n'est en fait que la première
+  plus 1-2 coups de plus se retrouvaient traitées comme deux combos sans
+  aucun rapport visible dans la liste, alors que l'une est clairement une
+  extension de l'autre. Réfléchi ensemble avant d'écrire un plan
+  (`docs/combo_families_plan.md`) puis de l'implémenter tel quel : détection
+  **automatique** par préfixe de `Steps` (pas de champ à maintenir à la
+  main — risque d'oubli/désync, déjà vécu avec les combos hallucinées, voir
+  plus haut), regroupement affiché avec indentation + badge `Niveau N`, et
+  suggestion textuelle (pas de bascule automatique) quand une combo maîtrisée
+  a une extension. Voir `Core/ComboFamilies.cs` dans la section Architecture
+  ci-dessus pour le détail technique. Vérifié avec deux combos de test
+  temporaires injectées dans `combos.json` (arme vide, 2 étapes + 4 étapes
+  dont les 2 premières identiques) — la famille a bien été détectée et
+  affichée groupée/indentée, retirées après vérification. Au passage, la
+  détection a aussi mis en évidence une vraie famille déjà présente dans les
+  presets Faux existants (`NLight vers NAir` → `NLight, NAir, SAir, Gravity
+  Cancel, DLight`), sans qu'elle ait été identifiée comme telle jusque-là.
+- Tolérance Saut + symétrie Gauche/Droite (`Core/ComboRunner.cs`) : demande
+  explicite de l'utilisateur sur deux comportements jugés trop stricts par
+  rapport au jeu réel. (1) Une étape qui demande "Saut" tolère désormais
+  toujours une direction tenue en plus (sauter en bougeant est normal en
+  jeu), même en `MatchMode.Strict` et sans avoir à cocher `ComboStep.
+  FreeMovement` à la main sur chaque étape de saut (`requiresJump` dans
+  `Feed`, court-circuite `strictMovementViolation`). (2) Une combo écrite
+  "vers la droite" doit marcher identiquement jouée "vers la gauche" — les
+  deux orientations sont symétriques, ce n'est pas une combo différente.
+  Implémenté comme une détection automatique par tentative
+  (`_mirroredDirections`, verrouillée une seule fois via `UpdateMirrorLock`
+  dès qu'une étape exige Gauche/Droite et que le joueur presse l'opposé
+  exact) plutôt qu'un réglage à choisir dans l'éditeur : dès que l'inversion
+  est détectée, `ComboRunner` attend l'opposé de ce que `Combo.Steps` décrit
+  pour Gauche/Droite jusqu'à la fin de la tentative (Haut/Bas jamais
+  inversés). Remis à zéro à chaque retour à l'étape 0 (échec/abandon/succès)
+  via `ResetMirrorState`, pour que l'orientation soit re-détectée à chaque
+  nouvelle tentative plutôt que de rester figée sur la première détectée.
+  Exposé côté UI via `ComboRunner.IsMirrored`/`MirrorChanged` : `MainWindow`
+  fait pivoter les icônes Gauche/Droite du panneau de combo (mode Tutoriel)
+  pour afficher la flèche réellement attendue plutôt que celle écrite dans
+  `Combo.Steps` (`_directionIconsByIndex`/`ApplyMirrorDisplay`), et affiche
+  un badge "Direction inversée détectée" au moment où l'inversion est
+  verrouillée.
 
 ## Pistes évoquées mais pas demandées/faites
 

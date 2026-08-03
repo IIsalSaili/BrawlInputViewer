@@ -143,6 +143,10 @@ public partial class MainWindow : Window
     // Images dont la variante de couleur (noir=défaut, vert=réussie, rouge=échec)
     // doit suivre l'état de la pastille — voir ActionIconBaseNames/SetPillIconVariant.
     private readonly Dictionary<int, List<System.Windows.Shapes.Path>> _pillIconImagesByIndex = new();
+    // Icônes Gauche/Droite d'une pastille (avec le nom de l'action telle qu'écrite dans
+    // la combo) : seules celles-ci sont retournées quand ComboRunner détecte une combo
+    // jouée en miroir (voir ComboRunner.MirrorChanged) — Haut/Bas n'y figurent jamais.
+    private readonly Dictionary<int, List<(string Action, System.Windows.Shapes.Path Shape)>> _directionIconsByIndex = new();
     private readonly Dictionary<int, ProgressBar> _pillBarsByIndex = new();
     private readonly Dictionary<int, TextBlock> _pillCountdownsByIndex = new();
 
@@ -708,6 +712,7 @@ public partial class MainWindow : Window
         _pillContentByIndex.Clear();
         _pillMaskByIndex.Clear();
         _pillIconImagesByIndex.Clear();
+        _directionIconsByIndex.Clear();
         _pillBarsByIndex.Clear();
         _pillCountdownsByIndex.Clear();
         _quizRevealed = false;
@@ -807,6 +812,15 @@ public partial class MainWindow : Window
                         shape.RenderTransformOrigin = new Point(0.5, 0.5);
                         shape.RenderTransform = new RotateTransform(rotation);
                     }
+                    if (action is "Gauche" or "Droite")
+                    {
+                        if (!_directionIconsByIndex.TryGetValue(i, out var directionIcons))
+                        {
+                            directionIcons = new List<(string, System.Windows.Shapes.Path)>();
+                            _directionIconsByIndex[i] = directionIcons;
+                        }
+                        directionIcons.Add((action, shape));
+                    }
                     iconShapes.Add(shape);
                     contentPanel.Children.Add(shape);
                 }
@@ -883,7 +897,45 @@ public partial class MainWindow : Window
             _comboStepsPanel.Children.Add(stepColumn);
         }
 
+        ApplyMirrorDisplay(_comboRunner?.IsMirrored ?? false);
         UpdateComboStepVisuals();
+    }
+
+    /// <summary>Tourne les icônes Gauche/Droite du panneau de combo pour refléter
+    /// l'orientation détectée par ComboRunner (voir ComboRunner.MirrorChanged) : en
+    /// miroir, chaque pastille Gauche/Droite affiche la flèche opposée à celle écrite
+    /// dans Combo.Steps, pour montrer visuellement ce qui est réellement attendu
+    /// (pas ce que Combo.Steps décrit dans son sens d'origine).</summary>
+    private void ApplyMirrorDisplay(bool mirrored)
+    {
+        foreach (var icons in _directionIconsByIndex.Values)
+        {
+            foreach (var (action, shape) in icons)
+            {
+                var displayedAction = mirrored ? OppositeDirection(action) : action;
+                if (ActionIconRotationDegrees.TryGetValue(displayedAction, out var rotation)
+                    && shape.RenderTransform is RotateTransform rt)
+                {
+                    rt.Angle = rotation;
+                }
+            }
+        }
+    }
+
+    private static string OppositeDirection(string action) => action switch
+    {
+        "Gauche" => "Droite",
+        "Droite" => "Gauche",
+        _ => action,
+    };
+
+    private void OnComboMirrorChanged(bool mirrored)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            ApplyMirrorDisplay(mirrored);
+            if (mirrored) ShowModeBadge("Direction inversée détectée — combo jouée en miroir");
+        });
     }
 
     private Grid? PillAt(int index)
@@ -1081,6 +1133,7 @@ public partial class MainWindow : Window
             _comboRunner.ComboCompleted -= OnComboCompleted;
             _comboRunner.ComboReset -= OnComboReset;
             _comboRunner.ComboAbandoned -= OnComboAbandoned;
+            _comboRunner.MirrorChanged -= OnComboMirrorChanged;
         }
 
         var index = AppState.ActiveComboIndex;
@@ -1096,6 +1149,7 @@ public partial class MainWindow : Window
             _comboRunner.ComboCompleted += OnComboCompleted;
             _comboRunner.ComboReset += OnComboReset;
             _comboRunner.ComboAbandoned += OnComboAbandoned;
+            _comboRunner.MirrorChanged += OnComboMirrorChanged;
         }
 
         RenderComboSteps();
@@ -1409,6 +1463,13 @@ public partial class MainWindow : Window
         ApplyWorkArea();
 
         RepositionPanel(_mode1Panel);
+        // BuildLayout() (appelé depuis le constructeur, avant que la fenêtre soit chargée)
+        // positionne déjà _mode3Panel via ApplyModeVisuals, mais _canvasWidth valait encore 0
+        // à ce moment-là (ApplyWorkArea() n'a pas encore tourné) : si Tutoriel est le mode actif
+        // au démarrage, le panneau restait coincé en haut-gauche au lieu d'être recentré une
+        // fois la vraie largeur d'écran connue.
+        _mode3Panel.UpdateLayout();
+        RepositionTopCenter(_mode3Panel);
 
         _historyClearTimer = new DispatcherTimer { Interval = HistoryClearDelay };
         _historyClearTimer.Tick += (_, _) =>
