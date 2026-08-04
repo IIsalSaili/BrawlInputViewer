@@ -32,6 +32,17 @@ public static class AppState
     private static List<Combo> _combos = ComboConfig.LoadOrEmpty();
     public static List<Combo> Combos => _combos;
 
+    // Tous les combos d'arme préréglés (les seuls vérifiés actuellement, voir
+    // LegendComboPresets.Table qui est vide) sont importés d'office au démarrage plutôt que
+    // d'attendre que l'utilisateur sélectionne chaque personnage/arme un par un — demande
+    // explicite de l'utilisateur ("toutes les légendes devraient avoir leur combo importé de
+    // base"). Upsert par Id stable (ImportWeaponPresets) donc sans effet sur les combos perso
+    // de l'utilisateur, et sans risque de dupliquer à chaque lancement.
+    static AppState()
+    {
+        foreach (var weapon in WeaponComboPresets.Weapons) ImportWeaponPresets(weapon);
+    }
+
     public static int ActiveMode { get; private set; }
     public static bool Locked { get; private set; } = true;
     public static int ActiveComboIndex { get; private set; } = _combos.Count > 0 ? 0 : -1;
@@ -45,6 +56,13 @@ public static class AppState
     // faisant autre chose. Cette bascule (tray + panneau + Ctrl+Alt+H) coupe le
     // suivi sans fermer l'app ni perdre la config.
     public static bool CaptureSuspended { get; private set; }
+
+    // Masque complètement l'overlay (fenêtre principale + barre de contrôle overlay) sans
+    // fermer l'app ni désinstaller les hooks — contrairement au verrouillage (AppState.Locked),
+    // qui laisse l'overlay affiché mais non interactif, ceci le rend invisible à l'écran tout en
+    // gardant l'icône de tray et le panneau de contrôle utilisables pour le réafficher. Demande
+    // explicite de l'utilisateur ("pouvoir totalement masquer l'appli sans la fermer").
+    public static bool OverlayHidden { get; private set; }
 
     // Stats de précision par action (mode Tutoriel), persistées entre sessions.
     private static readonly Dictionary<string, ActionStat> _stats = BuildStatsIndex(StatsConfig.LoadOrEmpty());
@@ -63,6 +81,7 @@ public static class AppState
     public static event Action<int>? ActiveComboChanged;
     public static event Action<bool>? RecordingChanged;
     public static event Action<bool>? CaptureSuspendedChanged;
+    public static event Action<bool>? OverlayHiddenChanged;
 
     public static void SetCaptureSuspended(bool suspended)
     {
@@ -71,9 +90,18 @@ public static class AppState
         CaptureSuspendedChanged?.Invoke(suspended);
     }
 
+    public static void SetOverlayHidden(bool hidden)
+    {
+        if (OverlayHidden == hidden) return;
+        OverlayHidden = hidden;
+        OverlayHiddenChanged?.Invoke(hidden);
+    }
+
+    public static void ToggleOverlayHidden() => SetOverlayHidden(!OverlayHidden);
+
     public static void ToggleCaptureSuspended() => SetCaptureSuspended(!CaptureSuspended);
 
-    /// <summary>Demande à l'overlay de révéler temporairement la combo en mode révision
+    /// <summary>Demande à l'overlay de révéler temporairement le combo en mode révision
     /// (déclenché depuis le panneau de contrôle, en plus du raccourci Ctrl+Alt+I).</summary>
     public static event Action? QuizRevealRequested;
     public static void RequestQuizReveal() => QuizRevealRequested?.Invoke();
@@ -163,11 +191,11 @@ public static class AppState
         if (ActiveComboIndex < 0 || ActiveComboIndex >= _combos.Count) SetActiveCombo(FirstFilteredIndex());
     }
 
-    /// <summary>Importe les 5 combos préréglées de l'arme donnée (voir WeaponComboPresets) dans
+    /// <summary>Importe les 5 combos préréglés de l'arme donnée (voir WeaponComboPresets) dans
     /// la liste. Idempotent par Id stable, mais en "upsert" plutôt qu'en skip : si le contenu
-    /// d'une combo préréglée a changé depuis un import précédent (ex. correction d'une combo
+    /// d'un combo préréglé a changé depuis un import précédent (ex. correction d'un combo
     /// infaisable), la réimporter met à jour son contenu (stats de performance remises à 0,
-    /// l'ancienne combo étant différente) au lieu de laisser l'ancien contenu figé.</summary>
+    /// l'ancien combo étant différent) au lieu de laisser l'ancien contenu figé.</summary>
     public static void ImportWeaponPresets(string weapon)
     {
         var indexById = new Dictionary<string, int>();
@@ -226,6 +254,7 @@ public static class AppState
         var legendFilter = Settings.TrainingLegendFilter;
         var result = new List<int>();
         var legendWeapons = string.IsNullOrEmpty(legendFilter) ? null : LegendComboPresets.WeaponsFor(legendFilter);
+        var maxDex = string.IsNullOrEmpty(legendFilter) ? -1 : LegendStats.MaxReachableDex(legendFilter);
         for (var i = 0; i < _combos.Count; i++)
         {
             var combo = _combos[i];
@@ -236,6 +265,15 @@ public static class AppState
                 if (!matchesLegend && !matchesCharacterWeapon) continue;
             }
             if (!string.IsNullOrEmpty(weaponFilter) && combo.Weapon != weaponFilter) continue;
+
+            // Un combo qui demande plus de Dex que ce que le personnage choisi peut atteindre même
+            // avec une stance (base + 1, voir LegendStats) est physiquement injouable sur lui — ne
+            // devrait pas apparaître comme une option pour ce personnage (demande explicite de
+            // l'utilisateur, confirmée par un cas réel : Teros, Dex 3, avec d'anciens combos
+            // demandant "7+"/"9" Dex). maxDex == -1 (pas de personnage choisi, ou stats inconnues)
+            // laisse tout passer, par prudence plutôt que de masquer sans certitude.
+            if (maxDex >= 0 && combo.MinDex is int minDex && minDex > maxDex) continue;
+
             result.Add(i);
         }
         return result;
@@ -247,7 +285,7 @@ public static class AppState
         return filtered.Count > 0 ? filtered[0] : -1;
     }
 
-    /// <summary>Position (0-based) et nombre de la combo active parmi les combos filtrées par
+    /// <summary>Position (0-based) et nombre du combo actif parmi les combos filtrés par
     /// arme, pour l'affichage "X/Y" du mode Tutoriel.</summary>
     public static (int Position, int Count) ActiveComboFilteredPosition()
     {
@@ -257,8 +295,8 @@ public static class AppState
 
     /// <summary>Change l'arme sur laquelle s'entraîner : filtre la liste de combos cyclée/affichée.
     /// Sans personnage actif, filtre pur sur l'arme. Avec un personnage actif, sous-filtre sur une
-    /// seule de ses armes (voir FilteredComboIndices). Si la combo active ne correspond plus au
-    /// nouveau filtre, bascule sur la première combo filtrée (ou -1 s'il n'y en a aucune).</summary>
+    /// seule de ses armes (voir FilteredComboIndices). Si le combo actif ne correspond plus au
+    /// nouveau filtre, bascule sur le premier combo filtré (ou -1 s'il n'y en a aucun).</summary>
     public static void SetTrainingWeaponFilter(string weapon)
     {
         if (Settings.TrainingWeaponFilter == weapon) return;
@@ -284,8 +322,16 @@ public static class AppState
         SettingsChanged?.Invoke();
     }
 
+    /// <summary>Désactive temporairement les modes Historique (0) et Grand affichage (1) — demande
+    /// explicite de l'utilisateur ("les modes qui affichent des grosses flèches à l'écran c'est
+    /// immonde"), le temps de retravailler leur rendu. Un seul indicateur à repasser à false pour
+    /// tout réactiver plus tard : le code des deux modes n'est pas supprimé, juste rendu
+    /// inaccessible (UI + AppState). Voir CLAUDE.md pour le détail.</summary>
+    public const bool CombosOnlyMode = true;
+
     public static void SetMode(int mode)
     {
+        if (CombosOnlyMode) mode = 2;
         if (mode is < 0 or > 2 || ActiveMode == mode) return;
         ActiveMode = mode;
         ModeChanged?.Invoke(mode);
@@ -293,6 +339,7 @@ public static class AppState
 
     public static void CycleMode()
     {
+        if (CombosOnlyMode) { SetMode(2); return; }
         var favorites = Settings.FavoriteModes.Count > 0 ? Settings.FavoriteModes : new List<int> { 0, 1, 2 };
         var idx = favorites.IndexOf(ActiveMode);
         var next = favorites[(idx + 1) % favorites.Count];
@@ -323,10 +370,46 @@ public static class AppState
         SetActiveCombo(filtered[(pos + 1) % filtered.Count]);
     }
 
+    /// <summary>Symétrique de CycleCombo en sens inverse — nécessaire pour la barre de contrôle
+    /// overlay et le chord manette Start+LB (§5.3 du plan UX), qui offrent tous deux un aller ET
+    /// un retour dans la liste plutôt que de ne pouvoir que tourner en avant.</summary>
+    public static void CyclePreviousCombo()
+    {
+        var filtered = FilteredComboIndices();
+        if (filtered.Count == 0) return;
+        var pos = filtered.IndexOf(ActiveComboIndex);
+        var prevPos = pos <= 0 ? filtered.Count - 1 : pos - 1;
+        SetActiveCombo(filtered[prevPos]);
+    }
+
     public static void SetRecording(bool recording)
     {
         if (Recording == recording) return;
         Recording = recording;
         RecordingChanged?.Invoke(recording);
+    }
+
+    // --- Parcours (docs/plan_ux_onboarding.md §4) : progression persistée entre sessions,
+    // séparée de combos.json/stats.json (contenu différent, pas de raison de les coupler). ---
+    private static readonly ParcoursProgress _parcoursProgress = ParcoursProgressConfig.LoadOrEmpty();
+    private static readonly HashSet<string> _completedLessonIds = new(_parcoursProgress.CompletedLessonIds);
+
+    public static IReadOnlyCollection<string> CompletedLessonIds => _completedLessonIds;
+    public static string ParcoursCurrentLessonId => _parcoursProgress.CurrentLessonId;
+
+    public static bool IsLessonCompleted(string lessonId) => _completedLessonIds.Contains(lessonId);
+
+    public static void MarkLessonCompleted(string lessonId)
+    {
+        if (!_completedLessonIds.Add(lessonId)) return;
+        _parcoursProgress.CompletedLessonIds = new List<string>(_completedLessonIds);
+        ParcoursProgressConfig.Save(_parcoursProgress);
+    }
+
+    public static void SetParcoursCurrentLesson(string lessonId)
+    {
+        if (_parcoursProgress.CurrentLessonId == lessonId) return;
+        _parcoursProgress.CurrentLessonId = lessonId;
+        ParcoursProgressConfig.Save(_parcoursProgress);
     }
 }

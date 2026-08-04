@@ -9,7 +9,7 @@ using System.Windows.Threading;
 namespace BrawlhallaOverlay;
 
 /// <summary>
-/// Éditeur manuel d'une combo : chaque étape est une ligne qu'on construit en
+/// Éditeur manuel d'un combo : chaque étape est une ligne qu'on construit en
 /// cliquant "Écouter" puis en appuyant sur UNE touche/bouton à la fois — exactement
 /// la mécanique de réassignation de l'onglet Touches du panneau de contrôle, pas du
 /// texte libre à taper. Une étape à plusieurs actions simultanées (ex. direction +
@@ -41,7 +41,7 @@ public partial class ComboEditorWindow : Window
     public Combo? Result { get; private set; }
 
     // Vrai quand cette fenêtre sert d'écran de relecture juste après un enregistrement
-    // en direct (Ctrl+Alt+R) plutôt que d'édition d'une combo déjà sauvegardée — même
+    // en direct (Ctrl+Alt+R) plutôt que d'édition d'un combo déjà sauvegardé — même
     // formulaire, juste un titre/aide différents pour que l'utilisateur comprenne qu'il
     // relit une capture pas encore validée (voir MainWindow.ReviewRecordedCombo et
     // docs/audit_features.md §1.5, qui sauvegardait auparavant direct sans relecture).
@@ -61,7 +61,7 @@ public partial class ComboEditorWindow : Window
     {
         var root = new StackPanel();
 
-        var titleText = _isRecordingReview ? "Vérifier la combo enregistrée" : _existing is null ? "Nouvelle combo" : "Modifier la combo";
+        var titleText = _isRecordingReview ? "Vérifier le combo enregistré" : _existing is null ? "Nouveau combo" : "Modifier le combo";
         root.Children.Add(new TextBlock { Text = titleText, Foreground = TextColor, FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12) });
         if (_isRecordingReview)
         {
@@ -76,14 +76,14 @@ public partial class ComboEditorWindow : Window
         }
 
         root.Children.Add(FieldLabel("Nom"));
-        _nameBox = new TextBox { Text = _existing?.Name ?? "Nouvelle combo", Margin = new Thickness(0, 0, 0, 8) };
+        _nameBox = new TextBox { Text = _existing?.Name ?? "Nouveau combo", Margin = new Thickness(0, 0, 0, 8) };
         root.Children.Add(_nameBox);
 
         root.Children.Add(FieldLabel("Description (optionnel)"));
         _descriptionBox = new TextBox { Text = _existing?.Description ?? "", Margin = new Thickness(0, 0, 0, 8) };
         root.Children.Add(_descriptionBox);
 
-        // Sans ça, une combo créée/enregistrée à la main ne peut jamais être
+        // Sans ça, un combo créé/enregistré à la main ne peut jamais être
         // rattachée à une arme (Combo.Weapon ne se remplissait auparavant que
         // via l'import des presets), donc elle devenait invisible dès qu'un
         // filtre d'arme était actif ailleurs dans l'app — voir
@@ -123,9 +123,9 @@ public partial class ComboEditorWindow : Window
         {
             Width = 160,
             Margin = new Thickness(6, 0, 0, 0),
-            ItemsSource = new[] { "Strict", "Tolérant (ignore le mouvement pur)" },
+            ItemsSource = new[] { "Refuser les directions en trop", "Les ignorer (mouvement libre)" },
             SelectedIndex = _existing?.MatchMode == MatchMode.IgnoreExtraneous ? 1 : 0,
-            ToolTip = "Strict : une direction tenue en trop (non demandée par l'étape) fait échouer la combo. Tolérant : le mouvement pur hors combo est ignoré.",
+            ToolTip = "Refuser les directions en trop : une direction tenue en plus de ce que demande l'étape (non demandée) fait échouer le combo. Les ignorer : ce mouvement pur hors combo n'est pas compté comme une faute.",
         };
         toleranceRow.Children.Add(_matchModeCombo);
         root.Children.Add(toleranceRow);
@@ -272,7 +272,7 @@ public partial class ComboEditorWindow : Window
             IsChecked = step?.FreeMovement ?? false,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center,
-            ToolTip = "Tolère n'importe quelle direction tenue en plus sur cette étape, même en mode Strict (ex. un coup qui demande de se décaler pour toucher la hitbox)",
+            ToolTip = "Tolère n'importe quelle direction tenue en plus sur cette étape, même avec « Refuser les directions en trop » (ex. un coup qui demande de se décaler pour toucher la hitbox)",
         };
         Grid.SetColumn(freeMovementBox, 3);
         row.Children.Add(freeMovementBox);

@@ -205,10 +205,13 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   `KeyBindConfig`), sans valeurs par défaut : l'app démarre à 0 combo, c'est
   à l'utilisateur d'en créer (enregistrement en direct ou éditeur manuel).
 - **Config/WeaponComboPresets.cs / Combo.Weapon** — bibliothèque de combos
-  d'arme génériques (non liés à un légend), sur 11 des 15 armes du jeu
-  (Épée, Lance, Marteau, Blasters, Katars, Hache, Arc, Faux, Gantelets, Canon —
-  Épée à deux mains/Orbe/Lance-fusée/Bottes de combat/Chakram n'ont
-  volontairement aucun combo, voir plus bas). Contenu **entièrement réécrit**
+  d'arme génériques (non liés à un légend), sur **9 des 15 armes du jeu**
+  (Épée, Marteau, Blasters, Katars, Hache, Arc, Faux, Canon, Lance — le
+  commentaire en tête de fichier disait longtemps "11 armes", incohérence
+  avec le code jamais corrigée jusqu'à la Version 17 ; corrigé au passage).
+  Les 6 autres (Épée à deux mains, Gantelets, Orbe, Lance-fusée, Bottes de
+  combat, Chakram) n'ont volontairement aucun combo, voir plus bas. Contenu
+  **entièrement réécrit**
   suite à un nouveau signalement de combos fausses (2ème occurrence après le
   correctif "Version 9"/"Correctif Faux" plus bas, cette fois sur la quasi
   totalité du fichier) : les combos viennent maintenant d'un post Reddit de
@@ -230,8 +233,13 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   cancel (techniques de mouvement, pas des boutons) sont traduits par la
   séquence la plus proche, la technique exacte étant précisée en
   `Description` (l'app ne peut pas la valider). Le niveau de Dex minimum
-  (mécanique que l'app ne modélise pas) est indicatif, en `Description`
-  uniquement — aucun combo n'est bloqué selon un Dex. Chaque combo a un `Id`
+  (mécanique que l'app ne modélise pas directement, voir `LegendStats.cs`)
+  était indicatif seulement jusqu'à la Version 17 (texte libre dans
+  `Description`) : `Combo.MinDex` (int?) l'extrait maintenant du texte
+  existant via une regex (`WeaponComboPresets.ParseMinDex`, pas de
+  resynchronisation manuelle sur les ~90 combos) et sert à **filtrer** les
+  combos hors de portée d'un personnage — voir `AppState.FilteredComboIndices`
+  et le bullet `LegendStats.cs` plus bas. Chaque combo a un `Id`
   stable (`preset-<arme>-<n>`) et `AppState.ImportWeaponPresets` fait un
   **upsert** (pas juste un skip-si-présent) : si le contenu d'une combo
   préréglée change suite à une correction, la réimporter met à jour son
@@ -246,27 +254,50 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   (`_visibleComboIndices` fait le lien avec les index absolus de
   `AppState.Combos` pour modifier/dupliquer/supprimer/réordonner sans se
   tromper de combo).
-- **Config/LegendComboPresets.cs / Combo.Legend** — bibliothèque séparée de
-  true combos propres à un légend précis (utilisant une attaque Signature
-  exclusive à ce légend sur une arme donnée, ex. "Ada Blasters" : dLight >
-  sSig). Même source Reddit et mêmes conventions de traduction que
-  `WeaponComboPresets.cs` — Signature (nSig/sSig/dSig) est **le même bouton**
-  que l'attaque forte générique en Brawlhalla (direction + `Att. forte`), ce
-  n'est pas une action séparée à ajouter au mapping clavier. Une combo de
-  légende dépend à la fois d'un légend ET d'une arme (`Combo.Legend` +
-  `Combo.Weapon` tous les deux renseignés), certains légends ayant des combos
-  sur plusieurs armes (ex. Cassidy sur Blasters et Marteau). `Id` stable
-  (`preset-legend-<légend>-<n>`), upsert via `AppState.ImportLegendPresets`.
-  Filtre dédié en plus (pas à la place) du filtre d'arme :
-  `AppState.Settings.TrainingLegendFilter` + `FilteredComboIndices` combinent
-  les deux filtres en ET (ex. "Ada" + "Blasters" ne montre que les combos Ada
-  sur Blasters). Onglet Combos : sélecteur de légend + bouton "Importer les
-  combos de ce légend", sous le sélecteur d'arme existant. Tous les légends
-  du jeu n'ont pas de combo listé dans la source. `ComboEditorWindow` a aussi
-  un sélecteur "Légend (optionnel)" à côté du sélecteur d'arme, même raison
-  que ce dernier (voir plus bas, correctif §1.3) : une combo créée à la main
-  doit pouvoir être rattachée à un légend pour rester visible sous un filtre
-  de légend actif.
+- **Config/LegendStats.cs** (Version 17) — stats de base (Force/Dex/Défense/
+  Vitesse) des 69 légendes, sourcées sur `brawlmance.com/legends` (site
+  communautaire, pas officiel mais largement utilisé par la scène
+  compétitive) ; mécanique de stance (+1 sur un stat, -1 sur un autre — un
+  seul swap, jamais un gros boost) confirmée sur `brawlhalla.wiki.gg/wiki/Stats`.
+  `LegendStats.MaxReachableDex(legend)` = Dex de base + 1, jamais plus : sert
+  à juger si un combo (`Combo.MinDex`) est humainement jouable sur le
+  personnage entraîné. Dex ≠ Speed : Dex gouverne le temps de récupération
+  après une attaque (donc la fenêtre pour enchaîner), Speed est la vitesse de
+  déplacement, un stat totalement différent — question posée explicitement
+  par l'utilisateur pendant le travail, tranchée par la doc du wiki citée
+  ci-dessus avant d'écrire quoi que ce soit avec ces données.
+  `AppState.FilteredComboIndices` exclut maintenant un combo dont
+  `MinDex` dépasse `MaxReachableDex` du personnage actif ; `MainWindow.
+  UpdateDexRequirement` affiche en plus, sous le nom de la combo active en
+  mode Tutoriel, le seuil requis et si le personnage l'a déjà (vert), ne
+  l'atteint qu'avec une stance (orange), ou ne peut pas du tout l'atteindre
+  (rouge — ne devrait normalement plus arriver puisque filtré, mais reste
+  honnête si la combo active a été choisie avant un changement de
+  personnage). Demande explicite de l'utilisateur, avec un cas réel à
+  l'appui : les anciens combos Teros (Dex de base 3, max 4 avec stance)
+  demandaient "7+"/"9" Dex dans `LegendComboPresets.cs` — physiquement
+  impossibles, pas juste non sourcés.
+- **Config/LegendComboPresets.cs / Combo.Legend** — **depuis la Version 17,
+  ne contient plus aucun combo** (`Table` vide intentionnellement) : les true
+  combos par légende (utilisant une Signature exclusive) reposaient sur la
+  même source Reddit que `WeaponComboPresets.cs`, jamais re-vérifiée arme par
+  arme, et l'utilisateur ne leur fait plus confiance après un cas prouvé
+  impossible (Teros, Dex de base 3, avait des combos demandant "7+"/"9" Dex
+  alors que le max atteignable avec une stance est 4 — voir `LegendStats.cs`
+  et Version 17 dans l'historique). La structure (`Legends`/`WeaponsFor`/
+  `BuildPresetCombos`) reste en place pour pouvoir réintroduire des combos de
+  légende plus tard avec une source jugée fiable.
+  **`Legends` couvre maintenant les 69 légendes du jeu** (contre 30
+  auparavant, qui ne couvrait par accident que les légendes citées dans les
+  anciens combos) — sourcé sur `brawlhalla.com/legends/`, confirmé par
+  l'utilisateur qu'aucune n'est un skin/crossover à exclure.
+  **`WeaponsFor(legend)` ne dérive plus des combos** (qui sont maintenant
+  vides) mais lit une table `LegendWeapons` dédiée, sourcée indépendamment
+  (les 2 armes réelles de chaque légende, une page officielle par légende) —
+  c'est ce qui permet à un personnage sans aucun combo dédié (donc tous,
+  pour l'instant) d'afficher quand même les combos génériques de ses 2 armes
+  réelles via `AppState.FilteredComboIndices`, au lieu de n'afficher que ce
+  qui était accidentellement couvert par l'ancienne table de combos.
 - **Models/OverlaySettings.cs / Config/OverlaySettingsConfig.cs** — réglages
   persistés dans `settings.json` : échelle, opacité, position de l'overlay
   (`BottomLeft`/`BottomRight`/`TopLeft`/`TopRight`/`Free`), mode par défaut au
@@ -305,10 +336,46 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   AZERTY/QWERTY différent selon le PC, ou un jeu de touches distinct par
   contexte (solo/équipe). Les combos et l'apparence restent partagés entre
   profils (seules les touches changent).
-- **Windows/StartupWindow.xaml / .xaml.cs** — écran d'accueil, `StartupUri`
-  réel de `App.xaml` (remplace `MainWindow.xaml` à ce rôle depuis la Version
-  11, voir Historique). Fenêtre bordée classique (comme `ControlPanelWindow`,
-  même palette bleu-nuit/or), pas l'overlay in-game : sélecteur Personnage
+- **Windows/OnboardingWindow.xaml / .xaml.cs** — fourche du tout premier
+  lancement (Version 13, voir plus bas), affichée à la place de
+  `StartupWindow` tant que `Settings.OnboardingCompleted` n'est pas vrai
+  (choix fait dans `App.xaml.cs.OnStartup`, plus de `StartupUri` XAML fixe).
+  Un seul écran commun ("Tu es plutôt…", 3 cartes) puis, selon le choix :
+  Expert → réouvre `StartupWindow` tel quel ; Connaisseur → grille de
+  personnages (portraits `Assets/Legends/*.png`) puis import implicite des
+  combos du personnage choisi (`AppState.ImportCharacterPresets`, plus de
+  bouton "Importer" séparé à deviner) ; Débutant → aucune autre question.
+  Les trois convergent vers un écran "Voilà ce qui va se passer" qui prévient
+  *avant* que l'overlay ne remplace la fenêtre par une surface transparente
+  click-through (au lieu du seul ballon de notification 6s d'avant). Marque
+  `Settings.OnboardingCompleted = true` avant de lancer, pour ne plus jamais
+  se réafficher ensuite. `OverlaySettingsConfig.LoadOrCreateDefault` migre les
+  installations déjà existantes avant cette version (`OnboardingCompleted`
+  absent du JSON → `null` après désérialisation) vers `true` directement,
+  pour ne pas leur imposer rétroactivement une fourche qu'elles n'ont jamais
+  eu besoin de voir. Le profil Débutant ouvre en plus `ParcoursWindow`
+  (Chapitre 0+1 seulement, voir Version 14 — les chapitres 2 à 5 restent à
+  construire et le dit explicitement à l'écran plutôt que de laisser croire
+  qu'un contenu complet existe déjà) à côté de l'overlay lancé en mode
+  Historique.
+- **Windows/StartupWindow.xaml / .xaml.cs** — écran d'accueil complet, ouvert
+  par `App.xaml.cs.OnStartup` (plus de `StartupUri` XAML fixe depuis la
+  Version 13 : le choix entre elle et `OnboardingWindow` se fait en code,
+  voir plus haut) directement pour tout lancement après le tout premier, et
+  via `OnboardingWindow` (profil Expert) pour le tout premier. Fenêtre bordée
+  classique (comme `ControlPanelWindow`, même palette bleu-nuit/or), pas
+  l'overlay in-game. Affiche en tête un **bandeau de reprise**
+  (`BuildResumeBanner`, Version 13) si une combo est déjà active — "Reprendre
+  — <nom>" avec sa série record/statut maîtrisée, un clic relance directement
+  avec la sélection de la session précédente, sans repasser par le choix
+  personnage/arme/combo. Le sélecteur Personnage est une grille de portraits
+  cliquables (`BuildCharacterTile`, Version 13) plutôt qu'une `ComboBox` de 30
+  lignes de texte — techniquement, la `ComboBox` (`_characterCombo`) existe
+  toujours mais hors de l'arbre visuel (`Visibility.Collapsed`) : elle reste
+  la source de vérité de la sélection consommée par `RefreshWeaponOptions`/
+  `RefreshPortrait`/`RefreshCombosList`, un clic sur un portrait se contente
+  de lui réassigner `SelectedItem` pour redéclencher toute la chaîne existante
+  sans la dupliquer. Sélecteur Personnage
   (`LegendComboPresets.Legends`) → sous-filtre Arme dépendant du personnage
   (même logique que `ControlPanelWindow.BuildCombosTab`, dupliquée ici plutôt
   que partagée pour garder les deux fenêtres indépendantes — voir plus bas),
@@ -402,6 +469,93 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   - **Icône de tray** (`System.Windows.Forms.NotifyIcon`) : clic gauche
     ouvre/donne le focus au panneau de contrôle, clic droit propose un menu
     (verrouiller, changer de mode, ouvrir le panneau, quitter).
+- **Windows/OverlayControlBarWindow.xaml / .xaml.cs** — petite barre de
+  pilotage overlay (Version 13), instanciée par `MainWindow` (champ
+  `_controlBar`) en plus du panneau de contrôle et de la barre du tray :
+  répond au principe "rien d'obligatoire ne passe uniquement par un
+  raccourci" pour les actions les plus fréquentes en jeu. Contrairement à
+  `MainWindow`, **pas** click-through — c'est le seul endroit de l'overlay où
+  la souris doit pouvoir agir, donc une fenêtre séparée plutôt qu'une zone
+  spéciale de la fenêtre principale (qui est click-through globalement,
+  `WS_EX_TRANSPARENT` posé sur toute la fenêtre, pas par contrôle). Positionnée
+  en bas à droite de la zone de travail ciblée (`Reposition`, appelé depuis
+  `MainWindow.ApplyWorkArea` à chaque fois que celle-ci se recalcule), loin du
+  HUD par défaut (bas-gauche) pour ne jamais le recouvrir. Masquée par défaut :
+  seul un petit onglet semi-transparent ("≡", 32×32, opacité 0.45) reste
+  visible en permanence comme affordance de découverte ; le survol de cette
+  zone (`MouseEnter`/`MouseLeave` sur le `Grid` racine, un `DispatcherTimer`
+  de 500ms retarde la refermeture pour ne pas clignoter) révèle 5 boutons
+  (changer de mode, combo précédente/suivante, suspendre/reprendre la
+  capture, ouvrir le panneau), chacun avec un tooltip citant son raccourci
+  clavier ET manette. Vérifié visuellement (capture d'écran réelle,
+  automation UI pour un survol précis) : le survol étend bien la barre, et
+  elle se replie après avoir quitté la zone.
+- **Models/Lesson.cs / Config/ParcoursCurriculum.cs / Models/ParcoursProgress.cs +
+  Config/ParcoursProgressConfig.cs / Windows/ParcoursWindow.xaml.cs** — le "Parcours"
+  (§4 du plan UX onboarding, Version 14, voir plus bas) : suite de leçons courtes qui
+  enseignent une mécanique du jeu tout en faisant utiliser une fonction de l'app.
+  Contrairement au reste de l'app, `ParcoursWindow` démarre elle-même `AppState.Hook`/
+  `AppState.Gamepad` (idempotent, `Start()` ne fait rien si déjà démarré) : elle peut
+  s'ouvrir seule (bouton "Parcours" de `StartupWindow`), sans l'overlay ni son
+  tray/sa barre de contrôle. Pour la même raison elle a son **propre bouton de
+  verrouillage overlay et de suspension de capture dans son en-tête** (sinon les
+  raccourcis Ctrl+Alt+O/H, gérés par `MainWindow`, ne seraient interceptés par
+  personne si l'overlay n'est pas ouverte à côté).
+  Chaque `Lesson` a un `LessonValidationKind` qui reflète honnêtement ce que l'app
+  peut vérifier sans lire l'état du jeu (§4.2 du plan) : `PressAllOnce` (chaque
+  action pressée une fois, ordre libre), `Sequence` (suite ordonnée — réutilise un
+  `ComboRunner` **éphémère**, jamais persisté dans `combos.json`, plutôt que
+  dupliquer le moteur de matching), `AbsenceTimer` (ne PAS presser une action
+  pendant N secondes — seule validation possible pour un conseil de type
+  "retenue", ex. ne pas paniquer au dodge), `ToggleOnce` (un event `AppState`
+  précis — `LockChanged`/`CaptureSuspendedChanged` — se déclenche une fois, pour
+  les leçons sur l'app elle-même). Une leçon peut être `FullyValidatedByApp = false`
+  (badge "🟡 Partiellement validé") avec un `VerifyYourselfNote` explicite plutôt
+  que de prétendre confirmer un effet en jeu invérifiable. Progression persistée
+  dans `parcours_progress.json` (`AppState.MarkLessonCompleted`/
+  `IsLessonCompleted`/`SetParcoursCurrentLesson`), déblocage **souple** : le
+  bouton "Suivant" n'est jamais bloqué par la validation (voir §4.4 du plan —
+  un déblocage strict punirait le joueur expérimenté), et "Voir tout le parcours"
+  permet de sauter à n'importe quelle leçon.
+  Contenu : Chapitre 0 (3 leçons sur l'app elle-même, aucune donnée de jeu) +
+  Chapitre 1 "Survivre" (4 leçons : ressources aériennes, chaîne de récupération,
+  fast fall, ne pas paniquer au dodge) — sourcé le 2026-08-03 via
+  brawlhalla.wiki.gg/wiki/Movement **et** confirmation directe de l'utilisateur
+  depuis son expérience de jeu réelle (le pool de 3 actions aériennes réparties
+  2 sauts+1 récup OU l'inverse, le fonctionnement par cooldown — pas par
+  compteur — de l'esquive, l'absence de cooldown de la récupération). Deux
+  sources (wiki vs un post de forum) donnaient des cooldowns de dodge différents
+  (1s/2.7s vs 1.5s/3.5s) ; l'utilisateur a explicitement tranché en faveur du
+  wiki en cas de doute. Chapitre 2 "Frapper" (4 leçons : les 3 lights, les
+  aériens, Signature ≠ bouton séparé, ne pas spammer la Signature) ajouté en
+  Version 15 — sourcé par question directe à l'utilisateur d'abord : il a
+  explicitement rejeté une généralisation proposée sur le rôle des 3 lights
+  (\"neutre pour initier, latérale pour combo\"...), confirmant qu'il n'y a pas
+  de rôle universel (dépend de l'arme/du perso/du combo) — la leçon 2.1 a été
+  recentrée sur le simple repérage des 3 boutons plutôt que sur un usage
+  inventé. Chapitre 3 "Bouger" (3 leçons : Dash, Dash jump, Backdash) ajouté
+  en Version 16 — le plan prévoyait une 4ᵉ leçon "dodge directionnel comme
+  outil de déplacement" mais l'utilisateur a clarifié qu'elle n'est pas une
+  mécanique séparée (déjà couverte par 1.1, l'usage "recovery bonus" n'étant
+  qu'un à-côté) donc pas de leçon dédiée. Sourcé aussi par question directe :
+  au sol, Esquive+direction fait un Dash sans invincibilité (cooldown
+  indépendant de l'esquive aérienne — le dodge avec i-frames "n'existe pas"
+  au sol), Dash jump = direction → dash → saut ~0.5s après (propulsion avec
+  un peu de hauteur), Backdash = même mécanique que le Dash mais vers
+  l'arrière (orientation du personnage que l'app ne modélise pas, leçon
+  explicite là-dessus). Chapitres 4 et 5 du plan volontairement pas
+  construits (voir Version 14/15/16).
+  **Deux bugs réels trouvés en testant** (pas juste en relisant le code) : (1)
+  `OnGlobalKeyDown` de `ParcoursWindow` ne vérifiait pas `AppState.CaptureSuspended`
+  — une frappe réelle ailleurs sur le PC pendant un test a validé une leçon
+  `PressAllOnce` sans qu'aucune touche du test n'ait été pressée ; corrigé en
+  répliquant la même garde que `MainWindow.OnGlobalKeyDown`. (2) Les boutons
+  d'en-tête/pied de page (Suivant/Précédent/verrouiller/suspendre/voir tout)
+  gardaient le focus clavier WPF après un clic automation — un appui sur Espace
+  (l'action "Saut") réactivait aussi le dernier bouton focus au lieu de
+  seulement nourrir la leçon, faisant sauter des leçons de façon imprévisible ;
+  corrigé avec `Focusable = false` sur ces boutons (le clic souris reste
+  inchangé, seule la rétention de focus clavier est coupée).
 - **Windows/ControlPanelWindow.xaml.cs** — fenêtre de réglages classique
   (bordée, dans la taskbar, séparée de l'overlay), ouverte via `Ctrl+Alt+U` ou
   le tray. Navigation latérale à 5 onglets : **Général** (verrouillage,
@@ -478,6 +632,32 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
 | `Ctrl+Alt+U` | Ouvrir / donner le focus au panneau de contrôle       |
 | `Ctrl+Alt+I` | Révéler temporairement (3s) la combo active en mode révision |
 | `Ctrl+Alt+H` | Suspendre / reprendre la capture globale (voir `AppState.CaptureSuspended` ci-dessous) |
+
+Tous affichés en toutes lettres (avec leur raccourci en suffixe) dans le menu du
+tray (7/7 actions) et dans l'onglet À propos du panneau de contrôle — pour
+s'apprendre passivement plutôt que de rester cachés derrière le bandeau
+affiché 12s au premier lancement (voir "Version 13" ci-dessous).
+
+## Raccourcis manette (chords "Start + bouton")
+
+Ajoutés en Version 13 (voir plus bas) pour ne pas obliger un joueur au pad à
+lâcher la manette ou alt-tabber pour piloter l'app. Détectés dans
+`MainWindow.OnGlobalKeyDown/Up` via les codes synthétiques de `GamepadHook`
+(mêmes constantes `GP_*`), avec un état `_padStartDown` qui joue le même rôle
+que `_ctrlDown`/`_altDown` pour les chords clavier :
+
+| Chord              | Action                                   |
+|---------------------|-------------------------------------------|
+| `Start + RB`        | Combo suivante (`AppState.CycleCombo`)    |
+| `Start + LB`        | Combo précédente (`AppState.CyclePreviousCombo`, ajouté pour l'occasion) |
+| `Start + Y`         | Changer de mode (`AppState.CycleMode`)    |
+| `Start + Back`      | Suspendre/reprendre la capture            |
+| `Start + X`         | Ouvrir le panneau de contrôle             |
+
+Limite assumée et documentée (onglet À propos) : si un de ces boutons
+(LB/RB/X/Y/Back) est *aussi* assigné à une action de jeu dans l'onglet
+Touches, tenir Start en même temps déclenche le chord plutôt que l'action —
+pas de résolution de conflit plus fine pour l'instant.
 
 ## Historique des décisions (contexte utilisateur)
 
@@ -1000,9 +1180,274 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
   `Combo.Steps` (`_directionIconsByIndex`/`ApplyMirrorDisplay`), et affiche
   un badge "Direction inversée détectée" au moment où l'inversion est
   verrouillée.
+- Version 13 (UX & onboarding) : audit complet de l'ergonomie
+  (`docs/plan_ux_onboarding.md`) demandé après constat que le premier lancement
+  restait un cul-de-sac (4 décisions d'affilée devant une liste de combos
+  vide) et que tout passait par des raccourcis clavier non rebindables sans
+  équivalent manette. Exécuté : les 5 chantiers P0 (fourche de premier
+  lancement `OnboardingWindow`, import de combos implicite au choix du
+  personnage, barre de contrôle overlay `OverlayControlBarWindow`, écran
+  "voilà ce qui va se passer" avant que l'overlay ne remplace la fenêtre,
+  chords manette Start+bouton) et la majorité des P1 (accueil de reprise en
+  un clic, grille de portraits à la place de la `ComboBox` personnage, passe
+  de vocabulaire — "Grandes flèches"→"Grand affichage", "Mode révision"→
+  "Cacher les étapes (mémorisation)", "Strict/Tolérant"→"Refuser les
+  directions en trop/Les ignorer" — + glossaire FR↔notation communautaire
+  dans l'onglet À propos, réglages Général coupés en deux niveaux via un
+  `Expander` "Réglages avancés" replié par défaut, état vide du mode Tutoriel
+  explicite + explication du tout premier échec de combo affichée une fois
+  par session). Menu tray complété de 4/7 à 7/7 actions, toutes avec leur
+  raccourci en suffixe.
+  **Volontairement non fait** : le "Parcours" (§4 du plan, mode pédagogique
+  fusionnant tutoriel de jeu et tutoriel d'app) — construire ses chapitres 1
+  à 5 exigerait de sourcer de nombreuses affirmations factuelles sur le jeu
+  pièce par pièce, exactement le terrain où le projet s'est déjà trompé deux
+  fois (combos hallucinées "Version 9", citation fabriquée "Correctif Faux").
+  Un choix "Débutant" existe dans la fourche mais le dit explicitement à
+  l'écran (mode Historique en attendant) plutôt que de faire semblant qu'un
+  tel contenu existe. Également non faits : raccourcis clavier rebindables
+  (sortir les `VK_*` vers `settings.json` + écran de réassignation) et guide
+  de rythme progressif (métronome) — tous deux classés P2 dans le plan.
+  Vérifié par build (`dotnet build -c Release`, 0 avertissement/erreur après
+  chaque étape) et par test visuel réel : app lancée, écran de reprise
+  capturé par screenshot, bouton "Lancer en jeu" invoqué via UI Automation
+  (pas de simulation de frappe clavier/manette pendant que l'app tournait —
+  seulement clic sur un bouton et survol souris, conformément à la prudence
+  documentée plus bas sur `keybd_event`), survol de la barre de contrôle
+  overlay confirmé fonctionnel par capture d'écran avant/pendant/après
+  (bascule expand/collapse observée).
+- Version 14 (Parcours, Chapitre 0+1) : suite directe de la Version 13,
+  l'utilisateur ayant fait remarquer qu'il pouvait lui-même servir de source
+  pour le contenu de jeu du "Parcours" plutôt que de s'en remettre uniquement
+  à du web-scraping (déjà source de deux erreurs passées, voir "Version 9"/
+  "Correctif Faux"). Contenu du Chapitre 1 "Survivre" obtenu par question
+  directe à l'utilisateur (ressources aériennes : 2 sauts+1 récup OU
+  l'inverse, l'esquive sur cooldown pas compteur, la récupération sans
+  cooldown, le fast fall, les conseils anti-panique au dodge), recoupé avec
+  brawlhalla.wiki.gg/wiki/Movement pour les chiffres précis — un désaccord
+  entre le wiki et un post de forum sur le cooldown d'esquive (1s/2.7s vs
+  1.5s/3.5s) a été explicitement tranché par l'utilisateur en faveur du wiki.
+  Voir la section `Lesson`/`ParcoursCurriculum`/`ParcoursWindow` de
+  l'Architecture ci-dessus pour le détail technique (modèle de validation par
+  `LessonValidationKind`, réutilisation d'un `ComboRunner` éphémère pour les
+  leçons de type séquence).
+  **Deux bugs réels trouvés uniquement parce que testés en conditions
+  réelles** (pas seulement en relisant le code) : `ParcoursWindow` ne
+  respectait pas `AppState.CaptureSuspended` (une frappe faite ailleurs sur
+  le PC pendant un test a validé une leçon toute seule), et les boutons de
+  navigation gardaient le focus clavier WPF après un clic, donc taper
+  "Saut" (Espace) pendant un drill réactivait aussi le dernier bouton cliqué
+  — les deux corrigés (voir Architecture). Un incident distinct a eu lieu
+  pendant ces tests : une tentative d'envoyer des touches à une fenêtre
+  Notepad de secours a échoué silencieusement (`SetForegroundWindow` bloqué
+  par la protection anti-vol-de-focus de Windows depuis un processus en
+  arrière-plan) et les touches sont parties dans l'onglet Gmail réel de
+  l'utilisateur à la place (rien de cassé, juste un défilement) — voir
+  memory `feedback_no_input_injection_without_asking` : toute simulation de
+  frappe clavier doit désormais être confirmée explicitement avant envoi, et
+  la présence réelle du focus vérifiée via `GetForegroundWindow` plutôt que
+  supposée après un `SetForegroundWindow`.
+  Chapitres 2 à 5 du plan toujours pas construits (mécaniques de frappe,
+  mouvement avancé, techniques avancées) — à reprendre de la même façon
+  (interroger l'utilisateur directement plutôt que scraper le web en
+  premier) si demandé.
+- Version 15 (Parcours, Chapitre 2 "Frapper") : suite directe de la Version
+  14, même méthode de sourcing (question directe à l'utilisateur d'abord,
+  recoupement écrit ensuite si besoin). Deux réponses notables : (1) sur les
+  3 variantes de light (neutre/latérale/basse), l'utilisateur a explicitement
+  rejeté une généralisation proposée par erreur (\"neutre pour initier,
+  latérale pour combo, basse pour poke\"...) — il n'y a pas de rôle universel,
+  ça dépend de l'arme, du personnage et du combo visé. La leçon 2.1 a donc
+  été écrite pour repérer les 3 boutons (Att. légère seule / +Droite / +Bas),
+  sans leur inventer un usage générique — leçon retenue : quand l'utilisateur
+  dit "ça dépend", ne pas quand même écrire une version édulcorée de la
+  généralisation rejetée, la retirer complètement. (2) Sur les aériens
+  (nAir/sAir/dAir), les usages proposés (dAir=spike/gimp, nAir=sauvetage
+  rapide, sAir=edgeguard) ont été confirmés comme globalement justes mais
+  explicitement qualifiés de non-exclusifs par l'utilisateur — la leçon 2.2
+  le dit ("sans que ce soit exclusif"), plutôt que de présenter ces usages
+  comme des règles strictes. Sur la Signature (2.3, déjà établi ailleurs dans
+  ce fichier) et le spam de Signature (2.4 : animation lente qui bloque sur
+  place, whiff punissable, aspect frustrant/"toxique" pour l'adversaire sans
+  être illégal), confirmation directe sans correction nécessaire. 4 leçons
+  ajoutées à `ParcoursCurriculum.cs`, réutilisant les mêmes `LessonValidationKind`
+  que les chapitres précédents (aucun nouveau mécanisme de validation créé).
+  Testé en conditions réelles (leçon 2.1, séquence Att. légère seule → +Droite
+  → +Bas) : validée avec succès, mêmes précautions que la Version 14 (focus
+  vérifié via `GetForegroundWindow` avant tout envoi de touches).
+- Version 16 (Parcours, Chapitre 3 "Bouger") : suite directe, même méthode.
+  Correction notable de l'utilisateur sur le Dash : ce n'est PAS un double-tap
+  de direction comme une première hypothèse le supposait, mais littéralement
+  le bouton Esquive pressé au sol — au sol l'esquive avec invincibilité
+  "n'existe pas", donc le même bouton produit un Dash (déplacement rapide,
+  sans i-frames), sur un cooldown complètement séparé de l'esquive aérienne.
+  Le plan prévoyait une 4ᵉ leçon (dodge directionnel comme outil de
+  déplacement) ; l'utilisateur a clarifié qu'elle ferait doublon avec la
+  leçon 1.1 (l'esquive aérienne y est déjà couverte, son usage comme "option
+  de recovery en plus" n'étant qu'un à-côté) — leçon retirée du chapitre
+  plutôt que gardée en redondance. 3 leçons ajoutées (Dash, Dash jump,
+  Backdash), toutes `Sequence`/`FullyValidatedByApp=false` (l'app ne peut
+  jamais confirmer que le joueur était au sol, ni l'orientation du
+  personnage pour le Backdash — dit explicitement dans chaque
+  `VerifyYourselfNote`). Testé en conditions réelles (leçon 3.1, Droite +
+  Esquive) : validée avec succès.
+- Version 17 (audit de confiance sur les combos préréglés + roster complet +
+  faisabilité par Dex) : l'utilisateur a exprimé un doute général sur la
+  fiabilité des combos préréglés existants ("les combos sont peut être pas si
+  valide qu'on le pense"), tout en reconnaissant que la source Reddit
+  d'origine n'était de toute façon pas plus vérifiable qu'avant ("le scrap
+  reddit est pas si viable, on va les garder pour le moment"). Plutôt que de
+  laisser cette incertitude implicite, une revue complète a été montée dans
+  un artifact listant tous les combos `WeaponComboPresets`/`LegendComboPresets`
+  par arme/légend en notation communautaire — l'utilisateur l'a confirmée
+  globalement correcte pour les combos d'arme génériques ("les true combo que
+  tu as mis... me choquent pas"), mais a demandé 3 changements concrets :
+  1. **Combos de légende supprimés** (`LegendComboPresets.Table` vidée) : pas
+     de confiance dans cette partie spécifique de la source, contrairement
+     aux combos d'arme génériques. Structure gardée pour réintroduction
+     future avec une meilleure source.
+  2. **Roster étendu à 69 légendes** (contre 30, qui ne couvrait par accident
+     que celles citées dans les anciens combos) + une table `WeaponsFor`
+     indépendante des combos (2 armes réelles par légende, sourcée sur
+     `brawlhalla.com/legends/`) : un personnage sans combo de légende dédié
+     (donc tous, pour l'instant) affiche quand même les combos génériques de
+     ses vraies armes. Portraits ajoutés seulement pour 5 des 39 nouvelles
+     légendes (Orion, Gnash, Hattori, Sir Roland, Lucien) — les autres
+     utilisent des noms de code thématiques sur le CDN officiel
+     (`ActualSharkM`, `BountyHunterM`...) qui ne correspondent pas de façon
+     fiable aux noms de légendes (et semblent inclure des skins, pas
+     seulement les personnages de base) ; deviner le mapping a été jugé trop
+     risqué (attacherait silencieusement le mauvais portrait au mauvais nom)
+     et laissé de côté plutôt que fait au hasard — `MainWindow.
+     UpdateLegendPortrait`/`StartupWindow` gèrent déjà proprement l'absence de
+     fichier (masque plutôt que planter), donc rien n'est cassé en attendant.
+     Le portrait affiché dans le panneau Tutoriel suit maintenant
+     `AppState.Settings.TrainingLegendFilter` (le personnage entraîné) au lieu
+     de `Combo.Legend` (qui n'est presque plus jamais renseigné depuis le
+     retrait des combos de légende) — sans ce changement, le portrait n'aurait
+     plus jamais pu s'afficher.
+  3. **Faisabilité par Dex affichée et filtrée** : voir `LegendStats.cs` et
+     `Combo.MinDex` dans l'Architecture ci-dessus. Confirmé par un cas réel
+     que ce n'est pas cosmétique : les anciens combos Teros (Dex 3, max 4
+     avec stance) demandaient jusqu'à "9" Dex, physiquement impossible.
+  Au passage, **tous les modes sauf Tutoriel désactivés temporairement**
+  (`AppState.CombosOnlyMode = true`) : "les modes qui affichent des grosses
+  flèches à l'écran c'est immonde". Un seul indicateur à repasser à `false`
+  pour tout réactiver (UI grisée, pas supprimée, dans `StartupWindow`/
+  `ControlPanelWindow`/`OnboardingWindow`).
+  Correction de langue notée par l'utilisateur au passage (pas encore
+  appliquée à l'ensemble du code, seulement à ce qui a été écrit depuis) :
+  "combo" est masculin en français dans l'usage de la communauté Brawlhalla
+  ("un combo", pas "une combo") — l'app existante (UI + ce fichier) utilise
+  le féminin de façon incohérente à ~67 endroits ; correction en attente
+  d'arbitrage (sweep complet vs correction au fil de l'eau).
+  **Sourcing** : roster + armes sur `brawlhalla.com/legends/` (officiel),
+  stats sur `brawlmance.com/legends` (communautaire mais largement utilisé),
+  mécanique de stance sur `brawlhalla.wiki.gg/wiki/Stats` (officiel) — tout
+  confirmé/corrigé par l'utilisateur avant écriture (roster : "tous des
+  persos je te confirme que c'est bon" après vérification qu'aucun n'était un
+  skin/crossover). Testé en conditions réelles : import des combos Barraza
+  (Dex 4, max 5) → `combos.json` inspecté directement, confirme le filtrage
+  Dex correct (le seul combo Hache à 6+ Dex absent, tous les combos Blasters
+  à 3+ présents, celui à 9 absent) ; capture d'écran de la grille de 69
+  personnages et du mode "Tutoriel uniquement" confirmées après une session
+  de dépannage de fenêtre (`AttachThreadInput` nécessaire pour reprendre le
+  focus depuis un script PowerShell en arrière-plan, `SetForegroundWindow`
+  seul ne suffisant pas) — accord explicite de l'utilisateur demandé avant de
+  faire sauter une fenêtre par-dessus son stream en cours.
+- Version 18 (finitions signalées après la Version 17) : deux corrections
+  demandées ensemble ("occupe-toi des trucs laissés en attente" + "on peut
+  pas scroll pour accéder aux persos suivants donc c'est nul").
+  1. **Grille de personnages illisible au-delà de l'écran** : `StartupWindow`
+     mettait les 70 tuiles (69 légendes + "Tous") dans un `StackPanel`
+     horizontal à l'intérieur d'un `ScrollViewer` horizontal-only — la
+     molette de souris (verticale) ne fait rien sur ce genre de
+     `ScrollViewer` en WPF par défaut, et il n'y avait pas d'autre façon
+     d'atteindre les personnages hors champ. Remplacé par un `WrapPanel`
+     dans une `Grid` à colonne "Star" (largeur bornée par la fenêtre, donc le
+     retour à la ligne fonctionne réellement — un `StackPanel` horizontal
+     aurait donné une largeur infinie et empêché tout retour à la ligne) : la
+     grille s'enroule sur plusieurs lignes et profite du défilement vertical
+     de toute la page (déjà fonctionnel), sans second `ScrollViewer` imbriqué.
+     Vérifié en conditions réelles (capture d'écran avant/après scroll
+     molette) : les personnages en fin de liste (Sentinel, Seven, Sidra...)
+     sont bien atteignables.
+  2. **"une combo" → "un combo"** (accord masculin, usage de la communauté
+     Brawlhalla, signalé en Version 17) : sweep complet plutôt qu'un
+     arbitrage différé — tous les fichiers sous `Windows/`, `Core/` et
+     `Models/` corrigés (~90 occurrences au total avec les accords
+     d'adjectifs/participes qui en découlent : "cette combo" → "ce combo",
+     "aucune combo" → "aucun combo", "la combo active" → "le combo actif",
+     "une combo ratée/réussie/maîtrisée" → "un combo raté/réussi/maîtrisé",
+     etc.). Le contenu écrit depuis la Version 17 (`LegendStats.cs`,
+     `ParcoursCurriculum.cs`, `ParcoursWindow.xaml.cs`) était déjà correct,
+     vérifié en le relisant plutôt que supposé.
+- Version 19 (portraits — tentative puis retour en arrière) : suite au
+  retour "il manque vraiment beaucoup trop d'icônes de perso", tentative de
+  compléter les 33 légendes restantes (+ **Vector**, dont l'absence complète
+  de la `Legends` array — armes, stats, portrait — s'est révélée être un
+  vrai bug d'oubli de la Version 17, corrigé indépendamment du reste) en
+  récupérant leur "splash art" officiel (`brawlhalla.com/legends/<slug>/`,
+  variante `-150x150` générée par WordPress, ou recadrage carré manuel via
+  `System.Drawing` en PowerShell quand cette variante n'existait pas — ex.
+  Ezio, Lady Vera). **Rejeté par l'utilisateur** : les 35 portraits déjà en
+  place (30 d'origine + 5 de la Version 17) sont un rendu "Roster Pose"
+  statique (buste, pose neutre), alors que le "splash art" est une
+  illustration d'action dynamique en plein mouvement — recadrer un carré
+  dedans ne les rend pas stylistiquement cohérents avec le reste, même si le
+  résultat est techniquement une image valide du bon personnage. Les 34
+  fichiers ajoutés ont été supprimés ; `MainWindow.UpdateLegendPortrait`
+  retombe sur son masquage propre existant pour ces personnages (voir
+  Version 17), qui reste préférable à un mélange de styles. Les correctifs
+  de données de Vector (`LegendComboPresets.Legends`/`LegendWeapons`,
+  `LegendStats.Table`) sont conservés, seul son portrait a été retiré.
+  Le "Roster Pose" ne semble plus exister comme asset séparé pour les
+  légendes ajoutées après un certain point (leurs pages n'exposent que du
+  splash art, contrairement aux légendes plus anciennes qui ont les deux) —
+  à rouvrir seulement si une source de portraits au même gabarit que les 35
+  existants est trouvée, pas en réutilisant du splash art recadré.
+- Version 20 (portraits — les 69 légendes, source unique) : la Version 19
+  cherchait un mapping nom-de-code→légende pour deviner des URLs de "Roster
+  Pose" au cas par cas, ce qui ne marchait pas pour les légendes récentes.
+  Bonne piste trouvée en récupérant la page `brawlhalla.com/legends`
+  (rendue, pas juste `curl` — c'est une app SvelteKit) : chaque `<img>` de la
+  grille roster a un attribut `alt="<Nom de légende>"` collé directement à
+  son URL CDN, ce qui donne un mapping nom→image fiable et exhaustif en une
+  seule page, sans deviner de nom de code. Contrairement à ce que Version 19
+  supposait, **les 69 légendes ont bien une image dans ce style** (portrait
+  serré sur le visage/tête, coins déjà arrondis, fond transparent) — les 4
+  plus récentes (Loki, Seven, Imugi, Priya) utilisent juste un nom de
+  fichier différent ("...-icon.png" au lieu de "a_Roster_Pose_...") mais un
+  cadrage identique, vérifié visuellement avant d'appliquer à l'ensemble.
+  Suite à un retour utilisateur explicite ("tu mets ça partout, oublie les
+  portraits, je veux juste qu'ils aient tous le même style") : les 69
+  fichiers de `Assets/Legends/` ont été **entièrement remplacés** par cette
+  unique source (y compris les 35 déjà présents, pour garantir que tout le
+  monde vient du même endroit plutôt que de mélanger deux origines) — plus
+  aucun légend sans portrait, plus de fallback de masquage à gérer dans
+  `MainWindow.UpdateLegendPortrait`.
 
 ## Pistes évoquées mais pas demandées/faites
-
+- Réactiver les modes Historique et Grand affichage (`AppState.CombosOnlyMode`)
+  une fois leur rendu retravaillé — désactivés temporairement en Version 17.
+- Le "Parcours" pédagogique (`docs/plan_ux_onboarding.md` §4) : Chapitre 0
+  (prise en main de l'app), Chapitre 1 "Survivre" (Version 14), Chapitre 2
+  "Frapper" (Version 15) et Chapitre 3 "Bouger" (Version 16) faits — voir
+  Architecture (`ParcoursWindow`/`ParcoursCurriculum`) et les entrées
+  d'historique correspondantes. Restent les chapitres 4 et 5 (premier vrai
+  combo, techniques avancées). Nécessite de sourcer chaque
+  affirmation de jeu avant écriture ; la Version 14 a montré qu'interroger
+  directement l'utilisateur (qui joue réellement) puis recouper avec une
+  source écrite est plus fiable que scraper le web en premier — reproduire
+  cette méthode plutôt que fetch seul, avec test en jeu par l'utilisateur
+  comme arbitre final en cas de désaccord entre sources.
+- Raccourcis clavier rebindables (sortir les `VK_*` en dur de `MainWindow`
+  vers `settings.json` + écran de réassignation) — classé P2 dans le plan
+  UX, pas fait en Version 13.
+- Guide de rythme progressif (métronome sur la barre de tolérance) — classé
+  P2 dans le plan UX, pas fait en Version 13 : le timing a été retiré comme
+  condition d'échec sur demande explicite de l'utilisateur (voir plus haut),
+  toute réintroduction doit rester strictement indicative.
 - Profils multiples de configuration de touches — fait, voir section KeyBindConfig ci-dessus.
 - Intégration d'une API externe Brawlhalla (stats de match) — écarté pour
   rester un outil 100% local sans dépendance réseau/ToS tiers, à ne faire que

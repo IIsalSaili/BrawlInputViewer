@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Media;
 using System.Runtime.InteropServices;
@@ -55,6 +56,20 @@ public partial class MainWindow : Window
     private const int VK_U = 0x55;
     private const int VK_I = 0x49;
     private const int VK_H = 0x48;
+    private const int VK_M = 0x4D;
+
+    // --- Raccourcis manette (chord "Start + bouton"), voir §5.3.2 du plan UX onboarding :
+    // un joueur au pad ne devrait pas avoir à lâcher la manette pour changer de combo/mode.
+    // GamepadHook.SyntheticCodeBase + le flag du bouton (voir GamepadHook.Buttons) donne le
+    // même genre de "code touche" qu'un vrai VK, ce qui permet de réutiliser exactement le
+    // même chemin OnGlobalKeyDown/Up que le clavier et les chords Ctrl+Alt+*.
+    private const int GP_START = GamepadHook.SyntheticCodeBase + 0x0010;
+    private const int GP_BACK = GamepadHook.SyntheticCodeBase + 0x0020;
+    private const int GP_LB = GamepadHook.SyntheticCodeBase + 0x0100;
+    private const int GP_RB = GamepadHook.SyntheticCodeBase + 0x0200;
+    private const int GP_X = GamepadHook.SyntheticCodeBase + 0x4000;
+    private const int GP_Y = GamepadHook.SyntheticCodeBase + 0x8000;
+    private bool _padStartDown;
 
     private static bool IsCtrl(int vkCode) => vkCode is VK_CONTROL or VK_LCONTROL or VK_RCONTROL;
     private static bool IsAlt(int vkCode) => vkCode is VK_MENU or VK_LMENU or VK_RMENU;
@@ -120,6 +135,10 @@ public partial class MainWindow : Window
     private StackPanel _comboStepsPanel = null!;
     private TextBlock _comboNameText = null!;
     private TextBlock _comboDamageNoteText = null!;
+    private TextBlock _dexRequirementText = null!;
+    private TextBlock _firstFailExplainText = null!;
+    private bool _hasExplainedFirstComboFail;
+    private List<string> _lastFedActionNames = new();
     private TextBlock _comboStreakText = null!;
     private Image _legendPortraitImage = null!;
 
@@ -131,21 +150,21 @@ public partial class MainWindow : Window
     // usage en lecture seule dans un outil 100% local et non redistribué, pas une republication.
     // Nom de fichier dérivé de LegendComboPresets.Legends (source unique de la liste des légends)
     // plutôt qu'une seconde liste à maintenir en double : seuls les légends de cette liste (ceux
-    // qui ont au moins une combo Signature sourcée) ont un portrait.
+    // qui ont au moins un combo Signature sourcé) ont un portrait.
     private static string LegendPortraitFileName(string legend) => legend.Replace(" ", "") + ".png";
     private static readonly Dictionary<string, BitmapImage> _legendPortraitCache = new();
     private ContentControl _historySlotMode1 = null!;
     private ContentControl _historySlotMode3 = null!;
     // Contenu d'une pastille : un StackPanel horizontal (icône image et/ou glyphe
-    // texte par action requise) + un "?" qui le recouvre en mode révision.
+    // texte par action requise) + un "?" qui le recouvre en cacher les étapes.
     private readonly Dictionary<int, FrameworkElement> _pillContentByIndex = new();
     private readonly Dictionary<int, TextBlock> _pillMaskByIndex = new();
     // Images dont la variante de couleur (noir=défaut, vert=réussie, rouge=échec)
     // doit suivre l'état de la pastille — voir ActionIconBaseNames/SetPillIconVariant.
     private readonly Dictionary<int, List<System.Windows.Shapes.Path>> _pillIconImagesByIndex = new();
-    // Icônes Gauche/Droite d'une pastille (avec le nom de l'action telle qu'écrite dans
-    // la combo) : seules celles-ci sont retournées quand ComboRunner détecte une combo
-    // jouée en miroir (voir ComboRunner.MirrorChanged) — Haut/Bas n'y figurent jamais.
+    // Icônes Gauche/Droite d'une pastille (avec le nom de l'action tel qu'écrit dans
+    // le combo) : seules celles-ci sont retournées quand ComboRunner détecte un combo
+    // joué en miroir (voir ComboRunner.MirrorChanged) — Haut/Bas n'y figurent jamais.
     private readonly Dictionary<int, List<(string Action, System.Windows.Shapes.Path Shape)>> _directionIconsByIndex = new();
     private readonly Dictionary<int, ProgressBar> _pillBarsByIndex = new();
     private readonly Dictionary<int, TextBlock> _pillCountdownsByIndex = new();
@@ -290,6 +309,9 @@ public partial class MainWindow : Window
     // --- Panneau de contrôle (fenêtre séparée, ouverte à la demande) ---
     private ControlPanelWindow? _controlPanel;
 
+    // --- Barre de contrôle overlay (§5.3.1 du plan UX onboarding) ---
+    private OverlayControlBarWindow? _controlBar;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -304,6 +326,7 @@ public partial class MainWindow : Window
         AppState.ActiveComboChanged += _ => OnCombosOrActiveComboChanged();
         AppState.SettingsChanged += OnSettingsChanged;
         AppState.RecordingChanged += OnRecordingChanged;
+        AppState.OverlayHiddenChanged += OnOverlayHiddenChanged;
 
         Loaded += MainWindow_Loaded;
         Closed += (_, _) =>
@@ -315,9 +338,11 @@ public partial class MainWindow : Window
             AppState.Gamepad.ButtonUp -= OnGlobalKeyUp;
             AppState.Gamepad.Dispose();
             AppState.QuizRevealRequested -= RevealQuizStepsTemporarily;
+            AppState.OverlayHiddenChanged -= OnOverlayHiddenChanged;
             if (_trayIcon is not null) _trayIcon.Visible = false;
             _trayIcon?.Dispose();
             _controlPanel?.Close();
+            _controlBar?.Close();
         };
     }
 
@@ -342,7 +367,7 @@ public partial class MainWindow : Window
 
         _hintText = new TextBlock
         {
-            Text = "Ctrl+Alt+O : verrouiller/déverrouiller · Ctrl+Alt+P : changer de mode · Ctrl+Alt+K : changer de combo · Ctrl+Alt+R : enregistrer une combo · Ctrl+Alt+U : panneau de contrôle · Ctrl+Alt+I : révéler la combo (mode révision) · Ctrl+Alt+H : suspendre/reprendre la capture · glisser pour déplacer (mode 1)",
+            Text = "Ctrl+Alt+O : verrouiller/déverrouiller · Ctrl+Alt+P : changer de mode · Ctrl+Alt+K : changer de combo · Ctrl+Alt+R : enregistrer un combo · Ctrl+Alt+U : panneau de contrôle · Ctrl+Alt+I : révéler le combo (cacher les étapes) · Ctrl+Alt+H : suspendre/reprendre la capture · Ctrl+Alt+M : masquer/afficher l'overlay · glisser pour déplacer (mode 1)",
             Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
             FontSize = 11,
             Background = new SolidColorBrush(Color.FromArgb(0x99, 0x00, 0x00, 0x00)),
@@ -648,6 +673,36 @@ public partial class MainWindow : Window
             Visibility = Visibility.Collapsed,
         };
 
+        // Seuil de Dex requis + faisabilité pour le personnage entraîné (voir Combo.MinDex,
+        // LegendStats) — demande explicite de l'utilisateur : un combo qui exige plus de Dex que ce
+        // que le personnage peut atteindre (même avec stance) ne devrait même pas apparaître dans les
+        // listes (filtré dans AppState.FilteredComboIndices), mais celui qui EST montré doit quand
+        // même dire clairement le seuil, et si la marge est confortable ou tout juste suffisante.
+        _dexRequirementText = new TextBlock
+        {
+            FontSize = 12,
+            FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 8),
+            Visibility = Visibility.Collapsed,
+        };
+
+        // Explication du tout premier échec de combo (§5.6 du plan UX onboarding) : un simple
+        // flash rouge sans contexte oblige à deviner ce qui a raté. Affichée une seule fois par
+        // session (voir _hasExplainedFirstComboFail) pour ne pas polluer l'affichage une fois le
+        // mécanisme compris.
+        _firstFailExplainText = new TextBlock
+        {
+            FontSize = 12,
+            Foreground = new SolidColorBrush(Color.FromArgb(0xDD, 0xE7, 0x4C, 0x3C)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center,
+            MaxWidth = 360,
+            Margin = new Thickness(0, 6, 0, 0),
+            Visibility = Visibility.Collapsed,
+        };
+
         _comboStepsPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
 
         // L'historique de coups n'est plus affiché en mode Tutoriel : les pastilles de
@@ -659,8 +714,10 @@ public partial class MainWindow : Window
         var textContent = new StackPanel { Orientation = Orientation.Vertical };
         textContent.Children.Add(_comboNameText);
         textContent.Children.Add(_comboDamageNoteText);
+        textContent.Children.Add(_dexRequirementText);
         textContent.Children.Add(_comboStepsPanel);
         textContent.Children.Add(_comboStreakText);
+        textContent.Children.Add(_firstFailExplainText);
 
         // Portrait en colonne 0 (Auto, aligné en haut) : la colonne 1 (le reste du contenu,
         // toujours centré comme avant) occupe l'espace restant, ce qui place naturellement le
@@ -706,6 +763,92 @@ public partial class MainWindow : Window
         return panel;
     }
 
+    /// <summary>Affiche le portrait du personnage sur lequel on s'entraîne (AppState.Settings.
+    /// TrainingLegendFilter), indépendamment du combo actif — depuis le retrait des combos par
+    /// légende (voir LegendComboPresets.cs), Combo.Legend n'est presque plus jamais renseigné, mais
+    /// l'utilisateur veut quand même voir le portrait tant qu'un personnage est choisi, combo
+    /// générique ou pas, voire sans combo du tout. Appelée depuis RenderComboSteps (les deux
+    /// branches) et OnSettingsChanged (changer de personnage sans changer de combo actif ne lève
+    /// sinon jamais ActiveComboChanged) — jamais depuis un endroit qui reconstruit tout le panneau,
+    /// pour ne pas désynchroniser un combo en cours.</summary>
+    private void UpdateLegendPortrait()
+    {
+        var trainingLegend = AppState.Settings.TrainingLegendFilter;
+        if (string.IsNullOrEmpty(trainingLegend) || !LegendComboPresets.Legends.Contains(trainingLegend))
+        {
+            _legendPortraitImage.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var portraitFile = LegendPortraitFileName(trainingLegend);
+        if (!_legendPortraitCache.TryGetValue(portraitFile, out var portrait))
+        {
+            try
+            {
+                portrait = new BitmapImage(new Uri($"pack://application:,,,/Assets/Legends/{portraitFile}", UriKind.Absolute));
+                _legendPortraitCache[portraitFile] = portrait;
+            }
+            catch (IOException)
+            {
+                // Portrait pas encore récupéré pour ce personnage (roster étendu à 69 légendes,
+                // seuls 35 ont un fichier pour l'instant) — masquer plutôt que planter.
+                portrait = null;
+            }
+        }
+
+        if (portrait is not null)
+        {
+            _legendPortraitImage.Source = portrait;
+            _legendPortraitImage.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            _legendPortraitImage.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>Affiche le seuil de Dex requis par le combo actif (Combo.MinDex) et si le
+    /// personnage entraîné peut l'atteindre — demande explicite de l'utilisateur : "faudrait même
+    /// préciser vu que t'as les stats du perso sélectionné si il a les stats pour ou si il faut une
+    /// stance". FilteredComboIndices exclut déjà les combos hors de portée même avec stance, mais un
+    /// combo peut rester actif après un changement de personnage tant qu'on ne l'a pas changé —
+    /// cette méthode reste donc honnête même dans ce cas plutôt que de supposer que "affiché" veut
+    /// dire "jouable".</summary>
+    private void UpdateDexRequirement(Combo combo)
+    {
+        if (combo.MinDex is not int minDex)
+        {
+            _dexRequirementText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var legend = AppState.Settings.TrainingLegendFilter;
+        if (string.IsNullOrEmpty(legend) || !LegendStats.Table.TryGetValue(legend, out var stats))
+        {
+            _dexRequirementText.Text = $"Dex requis : {minDex}+";
+            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
+            _dexRequirementText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        _dexRequirementText.Visibility = Visibility.Visible;
+        if (minDex <= stats.Dex)
+        {
+            _dexRequirementText.Text = $"Dex requis : {minDex}+ — {legend} l'a déjà (Dex {stats.Dex})";
+            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromRgb(0x2E, 0xCC, 0x71));
+        }
+        else if (minDex == stats.Dex + 1)
+        {
+            _dexRequirementText.Text = $"Dex requis : {minDex}+ — jouable avec une stance (+1 Dex, {legend} est à {stats.Dex} de base)";
+            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0x7E, 0x22));
+        }
+        else
+        {
+            _dexRequirementText.Text = $"Dex requis : {minDex}+ — impossible sur {legend} même avec une stance (max {stats.Dex + 1})";
+            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromRgb(0xE7, 0x4C, 0x3C));
+        }
+    }
+
     private void RenderComboSteps()
     {
         _comboStepsPanel.Children.Clear();
@@ -724,10 +867,16 @@ public partial class MainWindow : Window
 
         if (activeIndex < 0 || combos.Count == 0)
         {
-            _comboNameText.Text = "Aucune combo — crée-en une (Ctrl+Alt+R ou le panneau de contrôle)";
+            // État vide explicite (§5.6 du plan UX onboarding) : "Aucun combo" tout court
+            // n'indique aucune action à faire — pointer vers le panneau de contrôle (l'icône
+            // dorée ≡ en bas à droite de l'overlay, ou Ctrl+Alt+U) est le chemin le plus direct
+            // pour en importer une, avant même de penser à en enregistrer une soi-même.
+            _comboNameText.Text = "Aucun combo sélectionné → ouvre le panneau de contrôle (icône ≡ en bas à droite, ou Ctrl+Alt+U) pour en importer un";
             _comboStreakText.Text = "";
             _comboDamageNoteText.Visibility = Visibility.Collapsed;
-            _legendPortraitImage.Visibility = Visibility.Collapsed;
+            _dexRequirementText.Visibility = Visibility.Collapsed;
+            UpdateLegendPortrait();
+            _firstFailExplainText.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -737,21 +886,7 @@ public partial class MainWindow : Window
         _comboNameText.Text = $"{weaponTag}{combo.Name}  ({filteredPos + 1}/{filteredCount} · Ctrl+Alt+K pour changer)";
         _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
 
-        if (!string.IsNullOrEmpty(combo.Legend) && LegendComboPresets.Legends.Contains(combo.Legend))
-        {
-            var portraitFile = LegendPortraitFileName(combo.Legend);
-            if (!_legendPortraitCache.TryGetValue(portraitFile, out var portrait))
-            {
-                portrait = new BitmapImage(new Uri($"pack://application:,,,/Assets/Legends/{portraitFile}", UriKind.Absolute));
-                _legendPortraitCache[portraitFile] = portrait;
-            }
-            _legendPortraitImage.Source = portrait;
-            _legendPortraitImage.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            _legendPortraitImage.Visibility = Visibility.Collapsed;
-        }
+        UpdateLegendPortrait();
 
         if (string.IsNullOrEmpty(combo.DamageNote))
         {
@@ -762,6 +897,8 @@ public partial class MainWindow : Window
             _comboDamageNoteText.Text = $"⚠ {combo.DamageNote}";
             _comboDamageNoteText.Visibility = Visibility.Visible;
         }
+
+        UpdateDexRequirement(combo);
 
         for (int i = 0; i < combo.Steps.Count; i++)
         {
@@ -934,7 +1071,7 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             ApplyMirrorDisplay(mirrored);
-            if (mirrored) ShowModeBadge("Direction inversée détectée — combo jouée en miroir");
+            if (mirrored) ShowModeBadge("Direction inversée détectée — combo joué en miroir");
         });
     }
 
@@ -1184,8 +1321,33 @@ public partial class MainWindow : Window
             var actions = _comboRunner?.Combo.Steps[index].RequiredActions ?? new List<string>();
             AppState.RecordStepResult(actions, success: false);
 
+            ExplainFirstComboFailIfNeeded(actions);
             FlashAllStepsRed(reason);
         });
+    }
+
+    /// <summary>Un simple flash rouge ne dit pas ce qui a raté — la 1ère fois qu'un combo casse
+    /// dans la session, affiche une ligne explicite (§5.6 du plan UX onboarding) plutôt que de
+    /// laisser deviner. Une seule fois : une fois le mécanisme compris, répéter le message à
+    /// chaque échec ajouterait juste du bruit.</summary>
+    private void ExplainFirstComboFailIfNeeded(List<string> expectedActions)
+    {
+        if (_hasExplainedFirstComboFail) return;
+        _hasExplainedFirstComboFail = true;
+
+        var expected = expectedActions.Count > 0 ? string.Join(" + ", expectedActions) : "?";
+        var actual = _lastFedActionNames.Count > 0 ? string.Join(" + ", _lastFedActionNames) : "(rien)";
+
+        _firstFailExplainText.Text = $"Mauvaise touche : tu as fait « {actual} », l'étape demandait « {expected} ».";
+        _firstFailExplainText.Visibility = Visibility.Visible;
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _firstFailExplainText.Visibility = Visibility.Collapsed;
+        };
+        timer.Start();
     }
 
     private void OnComboCompleted()
@@ -1229,11 +1391,11 @@ public partial class MainWindow : Window
                 if (justMastered)
                 {
                     combo.Mastered = true;
-                    ShowModeBadge($"Combo maîtrisée : {combo.Name} !");
+                    ShowModeBadge($"Combo maîtrisé : {combo.Name} !");
                 }
                 AppState.SaveCombosQuiet();
 
-                // Enchaînement façon "session guidée" : ne passe à la combo suivante
+                // Enchaînement façon "session guidée" : ne passe au combo suivant
                 // de la liste qu'une fois le seuil de réussites consécutives atteint
                 // (pas juste après la 1ère réussite), pour forcer une vraie répétition
                 // avant de progresser — cf. section "progression multi-combos" de
@@ -1453,12 +1615,17 @@ public partial class MainWindow : Window
 
         _mode2Layer.Width = _canvasWidth;
         _mode2Layer.Height = _canvasHeight;
+
+        _controlBar?.Reposition(workArea);
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         _hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         ApplyClickThrough(AppState.Locked);
+
+        _controlBar = new OverlayControlBarWindow(OpenControlPanel);
+        _controlBar.Show();
 
         ApplyWorkArea();
 
@@ -1487,7 +1654,7 @@ public partial class MainWindow : Window
 
         // Poll indépendant du clavier (contrairement à _comboTimer, jamais redémarré à
         // chaque appui) : c'est justement l'absence d'appui qu'on veut détecter, pour
-        // abandonner une combo en cours si le joueur ne l'a pas poursuivie depuis
+        // abandonner un combo en cours si le joueur ne l'a pas poursuivi depuis
         // ComboAbandonTimeout (voir ComboRunner.CheckAbandon).
         _comboAbandonPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _comboAbandonPollTimer.Tick += (_, _) => _comboRunner?.CheckAbandon(DateTime.UtcNow, ComboAbandonTimeout);
@@ -1544,22 +1711,39 @@ public partial class MainWindow : Window
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
 
-        var lockItem = new System.Windows.Forms.ToolStripMenuItem("Verrouiller / Déverrouiller");
+        var lockItem = new System.Windows.Forms.ToolStripMenuItem("Verrouiller / Déverrouiller (Ctrl+Alt+O)");
         lockItem.Click += (_, _) => Dispatcher.Invoke(AppState.ToggleLock);
         menu.Items.Add(lockItem);
 
-        var modeItem = new System.Windows.Forms.ToolStripMenuItem("Changer de mode");
+        var modeItem = new System.Windows.Forms.ToolStripMenuItem("Changer de mode (Ctrl+Alt+P)");
         modeItem.Click += (_, _) => Dispatcher.Invoke(AppState.CycleMode);
         menu.Items.Add(modeItem);
+
+        var comboItem = new System.Windows.Forms.ToolStripMenuItem("Changer de combo (Ctrl+Alt+K)");
+        comboItem.Click += (_, _) => Dispatcher.Invoke(AppState.CycleCombo);
+        menu.Items.Add(comboItem);
+
+        var recordItem = new System.Windows.Forms.ToolStripMenuItem("Démarrer/arrêter l'enregistrement d'un combo (Ctrl+Alt+R)");
+        recordItem.Click += (_, _) => Dispatcher.Invoke(() => AppState.SetRecording(!AppState.Recording));
+        menu.Items.Add(recordItem);
+
+        var revealItem = new System.Windows.Forms.ToolStripMenuItem("Révéler le combo (cacher les étapes, Ctrl+Alt+I)");
+        revealItem.Click += (_, _) => Dispatcher.Invoke(RevealQuizStepsTemporarily);
+        menu.Items.Add(revealItem);
 
         var suspendItem = new System.Windows.Forms.ToolStripMenuItem("Suspendre la capture (Ctrl+Alt+H)") { CheckOnClick = true };
         suspendItem.Click += (_, _) => Dispatcher.Invoke(AppState.ToggleCaptureSuspended);
         AppState.CaptureSuspendedChanged += suspended => suspendItem.Checked = suspended;
         menu.Items.Add(suspendItem);
 
+        var hideItem = new System.Windows.Forms.ToolStripMenuItem("Masquer/afficher l'overlay (Ctrl+Alt+M)") { CheckOnClick = true };
+        hideItem.Click += (_, _) => Dispatcher.Invoke(AppState.ToggleOverlayHidden);
+        AppState.OverlayHiddenChanged += hidden => hideItem.Checked = hidden;
+        menu.Items.Add(hideItem);
+
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
-        var panelItem = new System.Windows.Forms.ToolStripMenuItem("Ouvrir le panneau de contrôle");
+        var panelItem = new System.Windows.Forms.ToolStripMenuItem("Ouvrir le panneau de contrôle (Ctrl+Alt+U)");
         panelItem.Click += (_, _) => Dispatcher.Invoke(OpenControlPanel);
         menu.Items.Add(panelItem);
 
@@ -1592,26 +1776,22 @@ public partial class MainWindow : Window
         };
     }
 
-    /// <summary>Dessine une icône distincte au runtime plutôt que d'utiliser
-    /// SystemIcons.Application (icône Windows générique, indiscernable des
-    /// dizaines d'autres icônes système dans la zone de notification — un
-    /// premier utilisateur ne pouvait pas la repérer visuellement).</summary>
+    /// <summary>Icône de tray à partir du logo de l'app (Assets/AppLogo.png, voir le .csproj) —
+    /// remplace l'ancien "B" dessiné au runtime. Redimensionné en 32×32 ici (System.Drawing.Bitmap,
+    /// pas BitmapImage WPF, puisque NotifyIcon attend un System.Drawing.Icon).</summary>
     private static System.Drawing.Icon CreateTrayIcon()
     {
         const int size = 32;
+        using var stream = System.Windows.Application.GetResourceStream(
+            new Uri("pack://application:,,,/Assets/AppLogo.png", UriKind.Absolute))!.Stream;
+        using var source = new System.Drawing.Bitmap(stream);
         using var bmp = new System.Drawing.Bitmap(size, size);
         using (var g = System.Drawing.Graphics.FromImage(bmp))
         {
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
             g.Clear(System.Drawing.Color.Transparent);
-            using var bg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 0x2A, 0x2A, 0x2A));
-            g.FillEllipse(bg, 0, 0, size, size);
-            using var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(255, 0xE8, 0xC4, 0x4A), 2f);
-            g.DrawEllipse(pen, 1, 1, size - 2, size - 2);
-            using var font = new System.Drawing.Font("Segoe UI", 15, System.Drawing.FontStyle.Bold);
-            using var textBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(255, 0xE8, 0xC4, 0x4A));
-            var format = new System.Drawing.StringFormat { Alignment = System.Drawing.StringAlignment.Center, LineAlignment = System.Drawing.StringAlignment.Center };
-            g.DrawString("B", font, textBrush, new System.Drawing.RectangleF(0, -1, size, size), format);
+            g.DrawImage(source, 0, 0, size, size);
         }
 
         var hIcon = bmp.GetHicon();
@@ -1740,11 +1920,49 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_ctrlDown && _altDown && vkCode == VK_M)
+        {
+            Dispatcher.Invoke(AppState.ToggleOverlayHidden);
+            return;
+        }
+
+        if (vkCode == GP_START) _padStartDown = true;
+
+        if (_padStartDown && vkCode == GP_RB)
+        {
+            Dispatcher.Invoke(AppState.CycleCombo);
+            return;
+        }
+
+        if (_padStartDown && vkCode == GP_LB)
+        {
+            Dispatcher.Invoke(AppState.CyclePreviousCombo);
+            return;
+        }
+
+        if (_padStartDown && vkCode == GP_Y)
+        {
+            Dispatcher.Invoke(AppState.CycleMode);
+            return;
+        }
+
+        if (_padStartDown && vkCode == GP_BACK)
+        {
+            Dispatcher.Invoke(AppState.ToggleCaptureSuspended);
+            return;
+        }
+
+        if (_padStartDown && vkCode == GP_X)
+        {
+            Dispatcher.Invoke(OpenControlPanel);
+            return;
+        }
+
         // Suspendu : on garde le suivi Ctrl/Alt et les raccourcis ci-dessus actifs
         // (pour pouvoir se réactiver), mais on n'allume plus les touches, n'ajoute
         // plus à l'historique et ne nourrit plus le ComboRunner — sinon n'importe
         // quelle frappe faite ailleurs sur le PC (hors jeu) continue de faire
-        // avancer/rater silencieusement la combo en cours (voir AppState.CaptureSuspended).
+        // avancer/rater silencieusement le combo en cours (voir AppState.CaptureSuspended).
         if (AppState.CaptureSuspended) return;
 
         var hasBrushes = _brushesByVk.TryGetValue(vkCode, out var brushes);
@@ -1777,7 +1995,7 @@ public partial class MainWindow : Window
     // pour le détail de la tolérance mouvement/mash qui remplace l'ancien système de
     // fenêtre de regroupement, qui rendait certaines combos injouables). Seul
     // l'affichage dans l'historique (regroupement visuel "A + B", voir FlushPendingBinds)
-    // attend encore un court instant, sans impact sur la validation de la combo.
+    // attend encore un court instant, sans impact sur la validation du combo.
     private void QueuePendingBind(KeyBind bind)
     {
         _pendingBinds.Clear();
@@ -1789,6 +2007,7 @@ public partial class MainWindow : Window
             }
         }
 
+        _lastFedActionNames = _pendingBinds.Select(b => b.Action).ToList();
         _comboRunner?.Feed(new List<KeyBind>(_pendingBinds), DateTime.UtcNow);
 
         _comboTimer?.Stop();
@@ -1810,6 +2029,7 @@ public partial class MainWindow : Window
 
         if (IsCtrl(vkCode)) _ctrlDown = false;
         if (IsAlt(vkCode)) _altDown = false;
+        if (vkCode == GP_START) _padStartDown = false;
 
         _pressedVks.Remove(vkCode);
 
@@ -1977,7 +2197,7 @@ public partial class MainWindow : Window
 
     private void OnLockChanged(bool locked) => Dispatcher.Invoke(() => ApplyLockVisuals(locked));
 
-    private static readonly string[] ModeNames = { "Historique", "Grandes flèches", "Tutoriel" };
+    private static readonly string[] ModeNames = { "Historique", "Grand affichage", "Tutoriel" };
 
     private void ApplyModeVisuals(int mode, bool showBadge)
     {
@@ -2014,6 +2234,16 @@ public partial class MainWindow : Window
     {
         _suspendedBadge.Opacity = suspended ? 1.0 : 0.0;
         Canvas.SetLeft(_suspendedBadge, (_canvasWidth - _suspendedBadge.ActualWidth) / 2);
+    });
+
+    /// <summary>Masquage complet (distinct du verrouillage, qui laisse l'overlay affiché mais
+    /// non interactif) : cache la fenêtre principale et la barre de contrôle overlay sans les
+    /// fermer — les hooks et le tray restent actifs, donc Ctrl+Alt+M ou l'icône de tray
+    /// permettent de la réafficher instantanément.</summary>
+    private void OnOverlayHiddenChanged(bool hidden) => Dispatcher.Invoke(() =>
+    {
+        Visibility = hidden ? Visibility.Hidden : Visibility.Visible;
+        if (_controlBar is not null) _controlBar.Visibility = hidden ? Visibility.Hidden : Visibility.Visible;
     });
 
     private void ShowModeBadge(string text)
@@ -2087,14 +2317,14 @@ public partial class MainWindow : Window
         // sans passer par un éditeur, voir docs/audit_features.md §1.5). Réutilise
         // ComboEditorWindow pré-rempli avec les étapes capturées, pour pouvoir supprimer
         // une étape parasite, ajuster une tolérance ou renommer avant de valider — sinon
-        // la seule façon de corriger une combo mal enregistrée était de rouvrir l'éditeur
+        // la seule façon de corriger un combo mal enregistré était de rouvrir l'éditeur
         // après coup depuis la liste.
         var editor = new ComboEditorWindow(draft, isRecordingReview: true) { Owner = this };
         if (editor.ShowDialog() == true && editor.Result is not null)
         {
             AppState.Combos.Add(editor.Result);
             AppState.NotifyCombosMutated();
-            ShowModeBadge($"Combo enregistrée : {editor.Result.Name} ({editor.Result.Steps.Count} étapes)");
+            ShowModeBadge($"Combo enregistré : {editor.Result.Name} ({editor.Result.Steps.Count} étapes)");
             AppState.SetActiveCombo(AppState.Combos.Count - 1);
         }
         else
@@ -2129,6 +2359,15 @@ public partial class MainWindow : Window
             RepositionPanel(_mode1Panel);
             RepositionTopCenter(_mode3Panel);
             if (_comboRunner is not null) _comboRunner.KeepStreakOnFail = AppState.Settings.KeepStreakOnFail;
+
+            // Le portrait et la faisabilité Dex suivent TrainingLegendFilter — un changement de
+            // personnage sans changement de combo actif (déjà filtré pareil) ne lèverait sinon
+            // jamais ActiveComboChanged pour les rafraîchir. Juste ces deux-là, pas
+            // RenderComboSteps() au complet : ça reconstruirait les pastilles à l'état "step 0" et
+            // désynchroniserait l'affichage d'un combo en cours.
+            UpdateLegendPortrait();
+            var idx = AppState.ActiveComboIndex;
+            if (idx >= 0 && idx < AppState.Combos.Count) UpdateDexRequirement(AppState.Combos[idx]);
         });
     }
 

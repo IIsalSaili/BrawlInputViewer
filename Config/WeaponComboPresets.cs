@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 
 namespace BrawlhallaOverlay;
 
@@ -334,10 +335,22 @@ public static class WeaponComboPresets
                     Weapon = weapon,
                     DefaultToleranceMs = 450,
                     Steps = new List<ComboStep>(def.Steps),
+                    MinDex = ParseMinDex(def.Description),
                 });
             }
         }
         return result;
+    }
+
+    /// <summary>Extrait le seuil de Dex (ex. "3+ Dex", "9 Dex") déjà présent dans le texte de
+    /// Description de chaque combo, plutôt que de dupliquer la valeur dans un second champ à
+    /// resynchroniser à la main sur les ~90 combos existants. Null si absent (ex. "Dex non testé").</summary>
+    private static readonly Regex DexPattern = new(@"(\d+)\+?\s*Dex", RegexOptions.Compiled);
+
+    internal static int? ParseMinDex(string description)
+    {
+        var match = DexPattern.Match(description);
+        return match.Success ? int.Parse(match.Groups[1].Value) : null;
     }
 
     private static string Slug(string weapon) => weapon

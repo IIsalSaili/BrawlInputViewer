@@ -38,7 +38,7 @@ public enum ComboFailReason
 ///   "Action") sont, elles, toujours jugées à l'identique quel que soit le
 ///   MatchMode. ComboStep.FreeMovement tolère cet excédent de direction sur
 ///   une étape précise même en Strict (ex. un coup qui demande de se décaler
-///   pour toucher la hitbox, sans que ce décalage fasse partie de la combo).
+///   pour toucher la hitbox, sans que ce décalage fasse partie du combo).
 /// - Un mash/double-clic/chevauchement du bouton qui vient tout juste de
 ///   valider l'étape précédente (ex. cliquer Saut 3 fois pour caler son
 ///   timing, ou retaper la touche suivante avant d'avoir complètement
@@ -50,7 +50,7 @@ public enum ComboFailReason
 ///   (sauter en bougeant est normal en jeu), même en MatchMode.Strict et sans
 ///   que ComboStep.FreeMovement soit coché — pas besoin de le configurer à la
 ///   main pour chaque étape de saut, voir requiresJump ci-dessous.
-/// - Gauche/Droite d'une combo sont symétriques : la 1ère fois qu'une étape
+/// - Gauche/Droite d'un combo sont symétriques : la 1ère fois qu'une étape
 ///   exige une direction gauche/droite alors que le joueur presse l'opposée
 ///   (et que le reste de l'étape correspond), toute la tentative en cours
 ///   bascule en "miroir" (_mirroredDirections) — attendre l'opposé de ce que
@@ -146,7 +146,7 @@ public sealed class ComboRunner
         // sans distinction, un bug signalé dans docs/audit_features.md §1.1).
         // ComboStep.FreeMovement permet de tolérer ce même excédent sur une étape
         // précise même en Strict (ex. un coup qui demande de se décaler pour toucher
-        // la hitbox, sans que ce décalage fasse partie de la combo elle-même).
+        // la hitbox, sans que ce décalage fasse partie du combo lui-même).
         var extraMovement = new HashSet<string>(pressedMovement);
         extraMovement.ExceptWith(effectiveRequiredMovement);
 
@@ -220,9 +220,9 @@ public sealed class ComboRunner
         }
 
         // Le bouton de la toute première étape qui revient pendant une tentative en cours
-        // doit TOUJOURS faire échouer la combo, même s'il correspond à la tolérance de
+        // doit TOUJOURS faire échouer le combo, même s'il correspond à la tolérance de
         // mash ci-dessous : sans ça, marteler l'ensemble de ses touches en boucle finit
-        // par "valider" une combo par hasard (chaque bonne touche apparaît tôt ou tard
+        // par "valider" un combo par hasard (chaque bonne touche apparaît tôt ou tard
         // dans la boucle, et le retour périodique de la 1ère touche était toléré comme du
         // mash au lieu de reset). Ne s'applique qu'à partir de la 2ème étape : à l'étape 0,
         // c'est justement l'input attendu.
@@ -345,7 +345,7 @@ public sealed class ComboRunner
     /// une tentative en cours si le joueur n'a rien pressé depuis <paramref name="timeout"/> :
     /// pas une faute de timing sur une étape (voir docstring de classe, le timing n'est
     /// jamais un échec), juste un "il a arrêté, on relâche l'attente" pour ne pas rester
-    /// bloqué indéfiniment au milieu d'une combo. Sans effet tant qu'aucune étape n'a
+    /// bloqué indéfiniment au milieu d'un combo. Sans effet tant qu'aucune étape n'a
     /// encore été validée (rien à abandonner).</summary>
     public void CheckAbandon(DateTime now, TimeSpan timeout)
     {

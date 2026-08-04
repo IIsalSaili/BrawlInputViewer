@@ -5,7 +5,7 @@ namespace BrawlhallaOverlay;
 
 /// <summary>
 /// Détection purement calculée (rien de persisté dans combos.json) des "familles" de
-/// combos : un groupe où chaque combo (sauf la première) est une extension stricte
+/// combos : un groupe où chaque combo (sauf le premier) est une extension stricte
 /// d'une autre — mêmes premières étapes, dans le même ordre, plus au moins une étape
 /// en plus à la fin. Sert uniquement à l'affichage groupé/indenté dans les listes de
 /// combos (ControlPanelWindow, StartupWindow) — voir docs/combo_families_plan.md.
@@ -18,12 +18,12 @@ public static class ComboFamilies
     {
         public int FamilyId;
 
-        /// <summary>Membres triés par niveau croissant (1 = la plus courte), avec
+        /// <summary>Membres triés par niveau croissant (1 = le plus court), avec
         /// l'ordre d'origine comme départage entre combos de même niveau (siblings).</summary>
         public List<(Combo Combo, int Level)> MembersByLevel = new();
 
         /// <summary>Id des combos qui ont au moins une extension directe dans cette
-        /// famille — sert à savoir si une combo "Mastered" a un niveau supérieur à
+        /// famille — sert à savoir si un combo "Mastered" a un niveau supérieur à
         /// suggérer.</summary>
         public HashSet<string> ComboIdsWithFollowUp = new();
     }
@@ -122,7 +122,7 @@ public static class ComboFamilies
         return familiesByRootId.Values.ToList();
     }
 
-    /// <summary>Une combo prête à être affichée, avec sa position dans une famille si
+    /// <summary>Un combo prêt à être affiché, avec sa position dans une famille si
     /// elle en fait partie (Level 0 = pas de famille détectée, rendu inchangé).</summary>
     public readonly struct OrderedCombo
     {
@@ -166,8 +166,8 @@ public static class ComboFamilies
 
             if (familyByComboId.TryGetValue(combo.Id, out var family))
             {
-                // La combo courante fait partie d'une famille : on émet toute la famille
-                // d'un coup (triée par niveau), pas seulement cette combo, pour que les
+                // Le combo courant fait partie d'une famille : on émet toute la famille
+                // d'un coup (triée par niveau), pas seulement ce combo, pour que les
                 // membres restent groupés même si l'un d'eux est rencontré en premier.
                 foreach (var (member, level) in family.MembersByLevel)
                 {

@@ -4,254 +4,121 @@ using System.Linq;
 namespace BrawlhallaOverlay;
 
 /// <summary>
-/// Bibliothèque de true combos propres à un légend précis (utilisant une
-/// attaque Signature exclusive à ce légend sur une arme donnée), fournie par
-/// l'utilisateur via un post Reddit collé directement dans la conversation —
-/// pas de web fetch à faire/refaire, contrairement à WeaponComboPresets.cs.
+/// Roster complet des 69 légendes + leurs 2 armes chacune, sourcé sur
+/// https://www.brawlhalla.com/legends/ (liste) et les pages individuelles de chaque légende (armes),
+/// recoupé avec https://brawlmance.com/legends, 2026-08-03. Remplace l'ancienne liste de 30 légendes
+/// (couverture partielle, dérivée par accident des seuls combos disponibles à l'époque) — confirmé
+/// par l'utilisateur qu'aucune des 39 légendes ajoutées n'est un skin/crossover, ce sont bien des
+/// personnages de base.
 ///
-/// Une combo de légende dépend à la fois d'un légend ET d'une arme (ex. "Ada
-/// Blasters" ≠ "Ada" tout court) : chaque <see cref="Combo"/> généré porte
-/// donc à la fois <see cref="Combo.Legend"/> et <see cref="Combo.Weapon"/>.
-///
-/// Traduction : une attaque Signature (nSig/sSig/dSig) est le même bouton que
-/// l'attaque forte générique (Att. forte) — voir WeaponComboPresets.cs pour
-/// le détail des conventions de traduction (nAir/sAir/dAir, GC, Recovery,
-/// XPivot, etc.), réutilisées ici à l'identique.
-///
-/// Chargées à la demande via AppState.ImportLegendPresets(legend) et
-/// fusionnées dans combos.json (Id stable "preset-legend-&lt;légend&gt;-&lt;n&gt;").
+/// <b>Les combos par légende (utilisant une Signature exclusive) ont été retirés</b> (Table vide
+/// ci-dessous) : l'utilisateur ne les trouve pas fiables (source Reddit jamais re-vérifiée arme par
+/// arme, et un cas prouvé impossible trouvé — Teros, Dex de base 3, avait des combos demandant
+/// "7+"/"9" Dex alors que le max atteignable avec une stance est 4, voir LegendStats.cs). Faute
+/// d'une source de combos de légende jugée fiable, les combos génériques d'arme
+/// (WeaponComboPresets.cs) couvrent maintenant tout le monde via <see cref="WeaponsFor"/> : un
+/// personnage sans combo dédié (donc tous, pour l'instant) affiche quand même les combos génériques
+/// des 2 armes qu'il utilise réellement. La structure (Legends/WeaponsFor/BuildPresetCombos) reste
+/// en place pour pouvoir réintroduire des combos de légende plus tard si une source fiable apparaît.
 /// </summary>
 public static class LegendComboPresets
 {
     public static readonly List<string> Legends = new()
     {
-        "Ada", "Asuri", "Azoth", "Barraza", "Bodvar", "Cassidy", "Cross", "Diana", "Ember",
-        "Isaiah", "Jhala", "Jiro", "Koji", "Kor", "Lin Fei", "Mirage", "Mordex", "Queen Nai",
-        "Nix", "Ragnir", "Scarlet", "Sentinel", "Sidra", "Teros", "Thatch", "Val", "Vraxx",
-        "Xull", "Yumiko", "Zariel",
+        "Ada", "Arcadia", "Artemis", "Asuri", "Aurus", "Azoth", "Barraza", "Bodvar", "Brynn",
+        "Caspian", "Cassidy", "Cross", "Diana", "Dusk", "Ember", "Ezio", "Fait", "Gnash", "Hattori",
+        "Imugi", "Isaiah", "Jaeyun", "Jhala", "Jiro", "Kaya", "King Zuva", "Koji", "Kor", "Lady Vera",
+        "Lin Fei", "Loki", "Lucien", "Magyar", "Mako", "Mirage", "Mordex", "Munin", "Nix", "Onyx",
+        "Orion", "Petra", "Priya", "Queen Nai", "Ragnir", "Ransom", "Rayman", "Red Raptor", "Reno",
+        "Rupture", "Scarlet", "Sentinel", "Seven", "Sidra", "Sir Roland", "Teros", "Tezca", "Thatch",
+        "Thea", "Thor", "Ulgrim", "Val", "Vector", "Vivi", "Volkov", "Vraxx", "Wu Shang", "Xull",
+        "Yumiko", "Zariel",
+    };
+
+    /// <summary>Les 2 armes de chaque légende, en français (voir WeaponComboPresets.Weapons pour les
+    /// noms). Remplace l'ancienne dérivation via Table (qui ne couvrait que les armes citées dans les
+    /// combos de légende, maintenant vides) — donnée indépendante, sourcée directement.</summary>
+    private static readonly Dictionary<string, string[]> LegendWeapons = new()
+    {
+        ["Ada"] = new[] { "Blasters", "Lance" },
+        ["Arcadia"] = new[] { "Lance", "Épée à deux mains" },
+        ["Artemis"] = new[] { "Lance-fusée", "Faux" },
+        ["Asuri"] = new[] { "Katars", "Épée" },
+        ["Aurus"] = new[] { "Chakram", "Lance" },
+        ["Azoth"] = new[] { "Arc", "Hache" },
+        ["Barraza"] = new[] { "Hache", "Blasters" },
+        ["Bodvar"] = new[] { "Marteau", "Épée" },
+        ["Brynn"] = new[] { "Hache", "Lance" },
+        ["Caspian"] = new[] { "Gantelets", "Katars" },
+        ["Cassidy"] = new[] { "Blasters", "Marteau" },
+        ["Cross"] = new[] { "Blasters", "Gantelets" },
+        ["Diana"] = new[] { "Arc", "Blasters" },
+        ["Dusk"] = new[] { "Lance", "Orbe" },
+        ["Ember"] = new[] { "Arc", "Katars" },
+        ["Ezio"] = new[] { "Épée", "Orbe" },
+        ["Fait"] = new[] { "Faux", "Orbe" },
+        ["Gnash"] = new[] { "Marteau", "Lance" },
+        ["Hattori"] = new[] { "Épée", "Lance" },
+        ["Imugi"] = new[] { "Hache", "Épée à deux mains" },
+        ["Isaiah"] = new[] { "Canon", "Blasters" },
+        ["Jaeyun"] = new[] { "Épée", "Épée à deux mains" },
+        ["Jhala"] = new[] { "Hache", "Épée" },
+        ["Jiro"] = new[] { "Épée", "Faux" },
+        ["Kaya"] = new[] { "Lance", "Arc" },
+        ["King Zuva"] = new[] { "Marteau", "Bottes de combat" },
+        ["Koji"] = new[] { "Arc", "Épée" },
+        ["Kor"] = new[] { "Gantelets", "Marteau" },
+        ["Lady Vera"] = new[] { "Chakram", "Faux" },
+        ["Lin Fei"] = new[] { "Katars", "Canon" },
+        ["Loki"] = new[] { "Katars", "Faux" },
+        ["Lucien"] = new[] { "Katars", "Blasters" },
+        ["Magyar"] = new[] { "Marteau", "Épée à deux mains" },
+        ["Mako"] = new[] { "Katars", "Épée à deux mains" },
+        ["Mirage"] = new[] { "Faux", "Lance" },
+        ["Mordex"] = new[] { "Faux", "Gantelets" },
+        ["Munin"] = new[] { "Arc", "Faux" },
+        ["Nix"] = new[] { "Faux", "Blasters" },
+        ["Onyx"] = new[] { "Gantelets", "Canon" },
+        ["Orion"] = new[] { "Lance-fusée", "Lance" },
+        ["Petra"] = new[] { "Gantelets", "Orbe" },
+        ["Priya"] = new[] { "Chakram", "Épée" },
+        ["Queen Nai"] = new[] { "Lance", "Katars" },
+        ["Ragnir"] = new[] { "Katars", "Hache" },
+        ["Ransom"] = new[] { "Chakram", "Arc" },
+        ["Rayman"] = new[] { "Gantelets", "Hache" },
+        ["Red Raptor"] = new[] { "Bottes de combat", "Orbe" },
+        ["Reno"] = new[] { "Blasters", "Orbe" },
+        ["Rupture"] = new[] { "Katars", "Lance-fusée" },
+        ["Scarlet"] = new[] { "Marteau", "Lance-fusée" },
+        ["Sentinel"] = new[] { "Marteau", "Katars" },
+        ["Seven"] = new[] { "Lance", "Canon" },
+        ["Sidra"] = new[] { "Canon", "Épée" },
+        ["Sir Roland"] = new[] { "Lance-fusée", "Épée" },
+        ["Teros"] = new[] { "Hache", "Marteau" },
+        ["Tezca"] = new[] { "Bottes de combat", "Gantelets" },
+        ["Thatch"] = new[] { "Épée", "Blasters" },
+        ["Thea"] = new[] { "Bottes de combat", "Lance-fusée" },
+        ["Thor"] = new[] { "Marteau", "Orbe" },
+        ["Ulgrim"] = new[] { "Hache", "Lance-fusée" },
+        ["Val"] = new[] { "Gantelets", "Épée" },
+        ["Vector"] = new[] { "Lance-fusée", "Arc" },
+        ["Vivi"] = new[] { "Bottes de combat", "Blasters" },
+        ["Volkov"] = new[] { "Hache", "Faux" },
+        ["Vraxx"] = new[] { "Lance-fusée", "Blasters" },
+        ["Wu Shang"] = new[] { "Gantelets", "Lance" },
+        ["Xull"] = new[] { "Canon", "Hache" },
+        ["Yumiko"] = new[] { "Arc", "Marteau" },
+        ["Zariel"] = new[] { "Gantelets", "Arc" },
     };
 
     private static ComboStep S(params string[] actions) => new() { RequiredActions = new List<string>(actions) };
 
     private sealed record LegendComboDef(string Name, string Description, string Weapon, ComboStep[] Steps);
 
-    private const string Src = "source : true combos Reddit (testés à 0% de dégâts), fournis par l'utilisateur.";
-
-    private static readonly Dictionary<string, LegendComboDef[]> Table = new()
-    {
-        ["Ada"] = new[]
-        {
-            new LegendComboDef("DLight vers SSig", $"dLight > sSig — doit toucher les frames actives tardives du dernier tir de dLight ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Droite", "Att. forte") }),
-            new LegendComboDef("DLight vers DSig", $"dLight > dSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Bas", "Att. forte") }),
-        },
-        ["Asuri"] = new[]
-        {
-            new LegendComboDef("NSig vers DLight", $"nSig > dLight ({Src})", "Katars",
-                new[] { S("Att. forte"), S("Bas", "Att. légère") }),
-        },
-        ["Azoth"] = new[]
-        {
-            new LegendComboDef("SLight vers NSig", $"sLight > nSig — doit toucher les frames actives tardives de sLight ({Src})", "Hache",
-                new[] { S("Droite", "Att. légère"), S("Att. forte") }),
-        },
-        ["Barraza"] = new[]
-        {
-            new LegendComboDef("SLight vers NSig", $"sLight > nSig — doit toucher les frames actives tardives de sLight ({Src})", "Hache",
-                new[] { S("Droite", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Bodvar"] = new[]
-        {
-            new LegendComboDef("DLight vers SSig", $"dLight > sSig — doit toucher les frames actives tardives de dLight ({Src})", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Droite", "Att. forte") }),
-        },
-        ["Cassidy"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DLight vers SSig", $"dLight > sSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Droite", "Att. forte") }),
-            new LegendComboDef("NAir vers NSig", $"nAir > nSig — doit toucher le 2e tir de nAir ({Src})", "Blasters",
-                new[] { S("Saut"), S("Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DLight vers NSig (Marteau)", $"dLight > nSig ({Src})", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DLight, GC, SSig", $"dLight > GC > sSig — doit toucher les frames actives tardives de dLight ({Src}) GC = Esquive.", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Esquive"), S("Droite", "Att. forte") }),
-            new LegendComboDef("NLight vers NSig", $"nLight > nSig ({Src})", "Marteau",
-                new[] { S("Att. légère"), S("Att. forte") }),
-        },
-        ["Cross"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig — doit toucher les frames actives tardives du dernier tir de dLight ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("NAir vers NSig", $"nAir > nSig — doit toucher le 2e tir de nAir ({Src})", "Blasters",
-                new[] { S("Saut"), S("Att. légère"), S("Att. forte") }),
-        },
-        ["Diana"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig — doit toucher les frames actives tardives de dLight ({Src})", "Arc",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DAir vers DSig", $"dAir > dSig — doit toucher la dernière frame active du dAir au sol ({Src})", "Arc",
-                new[] { S("Saut"), S("Bas", "Att. légère"), S("Bas", "Att. forte") }),
-        },
-        ["Ember"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig — doit toucher les frames actives tardives de dLight ({Src})", "Arc",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DAir vers NSig", $"dAir > nSig — doit toucher les frames actives tardives de dAir ({Src})", "Arc",
-                new[] { S("Saut"), S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Isaiah"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DSig vers XPivot NAir", $"dSig > XPivot nAir ({Src}) XPivot = pivot par élan horizontal, à exécuter au bon timing en jeu.", "Blasters",
-                new[] { S("Bas", "Att. forte"), S("Droite"), S("Saut"), S("Att. légère") }),
-            new LegendComboDef("DLight vers NSig (Canon)", $"dLight > nSig — doit toucher les frames actives tardives de dLight ({Src})", "Canon",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Jhala"] = new[]
-        {
-            new LegendComboDef("SLight vers NSig", $"sLight > nSig — doit toucher les frames actives tardives de sLight ({Src})", "Hache",
-                new[] { S("Droite", "Att. légère"), S("Att. forte") }),
-        },
-        ["Jiro"] = new[]
-        {
-            new LegendComboDef("DSig vers NLight", $"dSig > nLight — anecdotique (en réalité 1 frame de dodge, mentionné à titre indicatif) ({Src})", "Épée",
-                new[] { S("Bas", "Att. forte"), S("Att. légère") }),
-        },
-        ["Koji"] = new[]
-        {
-            new LegendComboDef("DLight, GC, NSig", $"dLight > GC > nSig ({Src}) GC = Esquive.", "Épée",
-                new[] { S("Bas", "Att. légère"), S("Esquive"), S("Att. forte") }),
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Arc",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DAir vers DSig", $"dAir > dSig — doit toucher les frames actives tardives de dAir ({Src})", "Arc",
-                new[] { S("Saut"), S("Bas", "Att. légère"), S("Bas", "Att. forte") }),
-        },
-        ["Kor"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Lin Fei"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Canon",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Mirage"] = new[]
-        {
-            new LegendComboDef("SSig vers NLight", $"sSig > nLight ({Src})", "Lance",
-                new[] { S("Droite", "Att. forte"), S("Att. légère") }),
-        },
-        ["Mordex"] = new[]
-        {
-            new LegendComboDef("DSig vers NLight", $"dSig > nLight ({Src})", "Gantelets",
-                new[] { S("Bas", "Att. forte"), S("Att. légère") }),
-        },
-        ["Queen Nai"] = new[]
-        {
-            new LegendComboDef("DLight, GC, NSig", $"dLight > GC > nSig ({Src}) GC = Esquive.", "Lance",
-                new[] { S("Bas", "Att. légère"), S("Esquive"), S("Att. forte") }),
-        },
-        ["Nix"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig — doit toucher les dernières frames actives de dLight ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("NAir vers NSig", $"nAir > nSig — doit toucher les frames actives tardives de nAir ({Src})", "Blasters",
-                new[] { S("Saut"), S("Att. légère"), S("Att. forte") }),
-        },
-        ["Ragnir"] = new[]
-        {
-            new LegendComboDef("SLight vers NSig", $"sLight > nSig ({Src})", "Hache",
-                new[] { S("Droite", "Att. légère"), S("Att. forte") }),
-        },
-        ["Scarlet"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig — doit toucher les frames actives tardives de dLight ({Src})", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Sentinel"] = new[]
-        {
-            new LegendComboDef("NSig vers Récupération", $"nSig > Rec ({Src})", "Marteau",
-                new[] { S("Att. forte"), S("Haut", "Att. forte") }),
-            new LegendComboDef("DSig vers DLight", $"dSig > dLight ({Src})", "Katars",
-                new[] { S("Bas", "Att. forte"), S("Bas", "Att. légère") }),
-        },
-        ["Sidra"] = new[]
-        {
-            new LegendComboDef("NSig vers SLight", $"nSig > sLight ({Src})", "Canon",
-                new[] { S("Att. forte"), S("Droite", "Att. légère") }),
-            new LegendComboDef("NSig vers SSig", $"nSig > sSig ({Src})", "Canon",
-                new[] { S("Att. forte"), S("Droite", "Att. forte") }),
-            new LegendComboDef("NSig vers NLight", $"nSig > nLight ({Src})", "Épée",
-                new[] { S("Att. forte"), S("Att. légère") }),
-        },
-        ["Teros"] = new[]
-        {
-            new LegendComboDef("NSig vers DLight", $"nSig > dLight ({Src})", "Hache",
-                new[] { S("Att. forte"), S("Bas", "Att. légère") }),
-            new LegendComboDef("SLight vers NSig", $"sLight > nSig — doit toucher les frames actives tardives de sLight ({Src})", "Hache",
-                new[] { S("Droite", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DLight vers DSig", $"dLight > dSig — doit toucher les frames actives tardives de dLight ({Src})", "Marteau",
-                new[] { S("Bas", "Att. légère"), S("Bas", "Att. forte") }),
-        },
-        ["Thatch"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-            new LegendComboDef("DSig vers DLight", $"dSig > dLight ({Src})", "Blasters",
-                new[] { S("Bas", "Att. forte"), S("Bas", "Att. légère") }),
-            new LegendComboDef("DSig vers NLight", $"dSig > nLight ({Src})", "Blasters",
-                new[] { S("Bas", "Att. forte"), S("Att. légère") }),
-        },
-        ["Val"] = new[]
-        {
-            new LegendComboDef("DSig vers Récupération", $"dSig > Rec ({Src})", "Gantelets",
-                new[] { S("Bas", "Att. forte"), S("Haut", "Att. forte") }),
-        },
-        ["Vraxx"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig ({Src})", "Blasters",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Xull"] = new[]
-        {
-            new LegendComboDef("DLight vers NSig", $"dLight > nSig — doit toucher les frames actives tardives de dLight ({Src})", "Canon",
-                new[] { S("Bas", "Att. légère"), S("Att. forte") }),
-        },
-        ["Yumiko"] = new[]
-        {
-            new LegendComboDef("DSig vers NLight", $"dSig > nLight ({Src})", "Arc",
-                new[] { S("Bas", "Att. forte"), S("Att. légère") }),
-            new LegendComboDef("DSig vers Récupération", $"dSig > Rec ({Src})", "Arc",
-                new[] { S("Bas", "Att. forte"), S("Haut", "Att. forte") }),
-            new LegendComboDef("DSig vers SAir", $"dSig > sAir ({Src})", "Arc",
-                new[] { S("Bas", "Att. forte"), S("Saut"), S("Droite", "Att. légère") }),
-            new LegendComboDef("DSig vers Récupération (Marteau)", $"dSig > Rec ({Src})", "Marteau",
-                new[] { S("Bas", "Att. forte"), S("Haut", "Att. forte") }),
-            new LegendComboDef("DSig vers SAir (Marteau)", $"dSig > sAir ({Src})", "Marteau",
-                new[] { S("Bas", "Att. forte"), S("Saut"), S("Droite", "Att. légère") }),
-            new LegendComboDef("NSig vers XPivot DAir", $"nSig > XPivot dAir ({Src}) XPivot = pivot par élan horizontal.", "Marteau",
-                new[] { S("Att. forte"), S("Droite"), S("Saut"), S("Bas", "Att. légère") }),
-            new LegendComboDef("DSig vers NAir", $"dSig > nAir ({Src})", "Marteau",
-                new[] { S("Bas", "Att. forte"), S("Saut"), S("Att. légère") }),
-            new LegendComboDef("DSig vers NSig", $"dSig > nSig ({Src})", "Marteau",
-                new[] { S("Bas", "Att. forte"), S("Att. forte") }),
-            new LegendComboDef("NSig vers SAir", $"nSig > sAir ({Src})", "Marteau",
-                new[] { S("Att. forte"), S("Saut"), S("Droite", "Att. légère") }),
-        },
-        ["Zariel"] = new[]
-        {
-            new LegendComboDef("NSig, GC, NLight", $"nSig > GC > nLight ({Src}) GC = Esquive.", "Gantelets",
-                new[] { S("Att. forte"), S("Esquive"), S("Att. légère") }),
-        },
-    };
+    /// <summary>Vide intentionnellement — voir docstring de classe. Gardée typée (au lieu de
+    /// supprimer la déclaration) pour que BuildPresetCombos/ImportLegendPresets restent valides sans
+    /// changement si des combos de légende reviennent plus tard avec une source fiable.</summary>
+    private static readonly Dictionary<string, LegendComboDef[]> Table = new();
 
     /// <summary>Construit la liste des combos préréglées d'un légend (voir Table), avec un Id
     /// stable ("preset-legend-&lt;légend&gt;-&lt;n&gt;") pour permettre une réimportation idempotente.</summary>
@@ -280,14 +147,12 @@ public static class LegendComboPresets
     }
 
     private static string Slug(string legend) => legend
-        .Replace(" ", "-").ToLowerInvariant();
+        .Replace(" ", "").ToLowerInvariant();
 
-    /// <summary>Armes distinctes pour lesquelles ce légend a au moins une combo répertoriée dans
-    /// Table (donnée dérivée du contenu déjà vérifié, pas une nouvelle table à sourcer séparément).
-    /// Sert à restreindre le sous-filtre d'arme de ControlPanelWindow aux seules armes pertinentes
-    /// une fois un personnage choisi, au lieu de proposer les 15 armes du jeu sans distinction.</summary>
+    /// <summary>Les 2 armes réelles de cette légende (LegendWeapons), pas dérivées des combos —
+    /// indépendant du contenu de Table, donc valable même vide. Sert à restreindre le sous-filtre
+    /// d'arme de ControlPanelWindow, et surtout à choisir quels combos génériques d'arme afficher
+    /// pour ce personnage (AppState.FilteredComboIndices).</summary>
     public static List<string> WeaponsFor(string legend) =>
-        Table.TryGetValue(legend, out var defs)
-            ? defs.Select(d => d.Weapon).Distinct().ToList()
-            : new List<string>();
+        LegendWeapons.TryGetValue(legend, out var weapons) ? weapons.ToList() : new List<string>();
 }

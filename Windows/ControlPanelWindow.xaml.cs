@@ -73,7 +73,7 @@ public partial class ControlPanelWindow : Window
         // La nav garde le focus clavier par défaut, et ses flèches (ou même une
         // lettre comme "G", qui saute au premier onglet commençant par G via la
         // recherche incrémentale native du ListBox) sont aussi des touches de jeu
-        // (Att. légère, Taunt...) : sans ça, jouer/enregistrer une combo pendant
+        // (Att. légère, Taunt...) : sans ça, jouer/enregistrer un combo pendant
         // que le panneau a le focus changeait d'onglet à chaque appui. Onglet =
         // souris uniquement.
         _nav.PreviewKeyDown += (_, e) => e.Handled = true;
@@ -139,10 +139,18 @@ public partial class ControlPanelWindow : Window
 
     private UIElement BuildGeneralTab()
     {
+        // Découpage en deux niveaux (§5.5 du plan UX onboarding, docs/plan_ux_onboarding.md) :
+        // l'onglet Général accumulait 12 réglages sans rapport entre eux, à plat, dans l'ordre où
+        // ils ont été codés — un débutant devait trier 9 options qui ne le concernent pas encore.
+        // "panel" ne garde que ce qui sert au premier usage ; "advancedPanel" (repliée par défaut
+        // via un Expander) contient les réglages puissants — ils ne disparaissent pas, ils cessent
+        // d'être un péage devant les réglages du quotidien.
         var panel = new StackPanel();
         panel.Children.Add(SectionTitle("Général"));
 
-        panel.Children.Add(new TextBlock { Text = "Profil de touches", Foreground = TextColor, Margin = new Thickness(0, 0, 0, 4) });
+        var advancedPanel = new StackPanel();
+
+        advancedPanel.Children.Add(new TextBlock { Text = "Profil de touches", Foreground = TextColor, Margin = new Thickness(0, 0, 0, 4) });
         var profileRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
         var profileCombo = new ComboBox { Width = 160, ItemsSource = KeyBindConfig.ListProfiles(), SelectedItem = AppState.Settings.ActiveProfile, Margin = new Thickness(0, 0, 6, 0) };
         profileCombo.SelectionChanged += (_, _) =>
@@ -176,8 +184,8 @@ public partial class ControlPanelWindow : Window
             profileCombo.SelectedItem = AppState.Settings.ActiveProfile;
         };
         profileRow.Children.Add(deleteProfileBtn);
-        panel.Children.Add(profileRow);
-        panel.Children.Add(HelpText("Utile pour un mapping AZERTY/QWERTY différent selon le PC, ou un jeu de touches distinct solo/équipe. Change les touches de l'onglet « Touches » ; les combos et l'apparence restent partagés entre profils."));
+        advancedPanel.Children.Add(profileRow);
+        advancedPanel.Children.Add(HelpText("Utile pour un mapping AZERTY/QWERTY différent selon le PC, ou un jeu de touches distinct solo/équipe. Change les touches de l'onglet « Touches » ; les combos et l'apparence restent partagés entre profils."));
 
         var lockBtn = new Button { Content = LockLabel(), Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) };
         lockBtn.Click += (_, _) =>
@@ -202,7 +210,14 @@ public partial class ControlPanelWindow : Window
         void SuspendHandler(bool _) => Dispatcher.Invoke(() => suspendBtn.Content = SuspendLabel());
         AppState.CaptureSuspendedChanged += SuspendHandler;
         panel.Children.Add(suspendBtn);
-        panel.Children.Add(HelpText("Le suivi clavier/manette capte les touches partout sur le PC, même hors jeu (nécessaire pour fonctionner par-dessus Brawlhalla). Suspends la capture quand tu utilises juste ton PC normalement, sans quoi l'historique et la combo en cours du mode Tutoriel réagissent à ce que tu tapes ailleurs. Raccourci rapide : Ctrl+Alt+H."));
+        panel.Children.Add(HelpText("Le suivi clavier/manette capte les touches partout sur le PC, même hors jeu (nécessaire pour fonctionner par-dessus Brawlhalla). Suspends la capture quand tu utilises juste ton PC normalement, sans quoi l'historique et le combo en cours du mode Tutoriel réagissent à ce que tu tapes ailleurs. Raccourci rapide : Ctrl+Alt+H."));
+
+        var hideBtn = new Button { Content = HideOverlayLabel(), Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) };
+        hideBtn.Click += (_, _) => AppState.ToggleOverlayHidden();
+        void HideHandler(bool _) => Dispatcher.Invoke(() => hideBtn.Content = HideOverlayLabel());
+        AppState.OverlayHiddenChanged += HideHandler;
+        panel.Children.Add(hideBtn);
+        panel.Children.Add(HelpText("Contrairement au verrouillage, ceci cache complètement l'overlay à l'écran (sans le fermer ni couper les raccourcis). Raccourci rapide : Ctrl+Alt+M."));
 
         var startupCheck = new CheckBox
         {
@@ -213,20 +228,28 @@ public partial class ControlPanelWindow : Window
         };
         startupCheck.Checked += (_, _) => { StartupConfig.SetEnabled(true); AppState.Settings.LaunchAtStartup = true; AppState.SaveSettings(); };
         startupCheck.Unchecked += (_, _) => { StartupConfig.SetEnabled(false); AppState.Settings.LaunchAtStartup = false; AppState.SaveSettings(); };
-        panel.Children.Add(startupCheck);
+        advancedPanel.Children.Add(startupCheck);
 
         panel.Children.Add(new TextBlock { Text = "Mode actif au démarrage", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
-        var modeCombo = new ComboBox { Width = 220, HorizontalAlignment = HorizontalAlignment.Left, ItemsSource = new[] { "Historique", "Grandes flèches", "Tutoriel" }, SelectedIndex = AppState.Settings.DefaultMode };
+        var modeCombo = new ComboBox
+        {
+            Width = 220,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            ItemsSource = new[] { "Historique", "Grand affichage", "Tutoriel" },
+            SelectedIndex = AppState.CombosOnlyMode ? 2 : AppState.Settings.DefaultMode,
+            IsEnabled = !AppState.CombosOnlyMode,
+        };
         modeCombo.SelectionChanged += (_, _) =>
         {
             AppState.Settings.DefaultMode = modeCombo.SelectedIndex;
             AppState.SaveSettings();
         };
         panel.Children.Add(modeCombo);
+        if (AppState.CombosOnlyMode) panel.Children.Add(HelpText("Historique et Grand affichage sont temporairement désactivés — voir AppState.CombosOnlyMode."));
 
-        panel.Children.Add(new TextBlock { Text = "Modes inclus dans le cycle rapide (Ctrl+Alt+P)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
+        advancedPanel.Children.Add(new TextBlock { Text = "Modes inclus dans le cycle rapide (Ctrl+Alt+P)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
         var favPanel = new StackPanel { Orientation = Orientation.Horizontal };
-        string[] modeNames = { "Historique", "Grandes flèches", "Tutoriel" };
+        string[] modeNames = { "Historique", "Grand affichage", "Tutoriel" };
         for (int i = 0; i < modeNames.Length; i++)
         {
             int mode = i;
@@ -234,7 +257,8 @@ public partial class ControlPanelWindow : Window
             {
                 Content = modeNames[i],
                 Foreground = TextColor,
-                IsChecked = AppState.Settings.FavoriteModes.Contains(mode),
+                IsChecked = AppState.CombosOnlyMode ? mode == 2 : AppState.Settings.FavoriteModes.Contains(mode),
+                IsEnabled = !AppState.CombosOnlyMode,
                 Margin = new Thickness(0, 0, 16, 0),
             };
             cb.Checked += (_, _) =>
@@ -250,18 +274,18 @@ public partial class ControlPanelWindow : Window
             };
             favPanel.Children.Add(cb);
         }
-        panel.Children.Add(favPanel);
+        advancedPanel.Children.Add(favPanel);
 
         var keepStreakCheck = new CheckBox
         {
-            Content = "Garder la série de réussites même après une combo ratée",
+            Content = "Garder la série de réussites même après un combo raté",
             Foreground = TextColor,
             IsChecked = AppState.Settings.KeepStreakOnFail,
             Margin = new Thickness(0, 16, 0, 4),
         };
         keepStreakCheck.Checked += (_, _) => { AppState.Settings.KeepStreakOnFail = true; AppState.SaveSettings(); };
         keepStreakCheck.Unchecked += (_, _) => { AppState.Settings.KeepStreakOnFail = false; AppState.SaveSettings(); };
-        panel.Children.Add(keepStreakCheck);
+        advancedPanel.Children.Add(keepStreakCheck);
 
         var soundCheck = new CheckBox
         {
@@ -276,14 +300,14 @@ public partial class ControlPanelWindow : Window
 
         var chainCheck = new CheckBox
         {
-            Content = "Enchaîner automatiquement vers la combo suivante après réussite",
+            Content = "Enchaîner automatiquement vers le combo suivant après réussite",
             Foreground = TextColor,
             IsChecked = AppState.Settings.ChainCombos,
             Margin = new Thickness(0, 4, 0, 4),
         };
         chainCheck.Checked += (_, _) => { AppState.Settings.ChainCombos = true; AppState.SaveSettings(); };
         chainCheck.Unchecked += (_, _) => { AppState.Settings.ChainCombos = false; AppState.SaveSettings(); };
-        panel.Children.Add(chainCheck);
+        advancedPanel.Children.Add(chainCheck);
 
         var thresholdRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(18, 0, 0, 4) };
         thresholdRow.Children.Add(Label("Réussites consécutives requises avant de passer à la suivante"));
@@ -301,12 +325,12 @@ public partial class ControlPanelWindow : Window
             }
         };
         thresholdRow.Children.Add(thresholdBox);
-        panel.Children.Add(thresholdRow);
-        panel.Children.Add(HelpText("Session guidée : une combo n'est marquée « maîtrisée » et n'enchaîne vers la suivante qu'après ce nombre de réussites d'affilée (par défaut 1 = enchaîne dès la 1ère réussite)."));
+        advancedPanel.Children.Add(thresholdRow);
+        advancedPanel.Children.Add(HelpText("Session guidée : un combo n'est marqué « maîtrisé » et n'enchaîne vers le suivant qu'après ce nombre de réussites d'affilée (par défaut 1 = enchaîne dès la 1ère réussite)."));
 
         var quizCheck = new CheckBox
         {
-            Content = "Mode révision (masque les étapes pas encore jouées de la combo)",
+            Content = "Cacher les étapes (mémorisation) — masque les étapes pas encore jouées du combo",
             Foreground = TextColor,
             IsChecked = AppState.Settings.QuizMode,
             Margin = new Thickness(0, 4, 0, 4),
@@ -316,20 +340,20 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(quizCheck);
 
         var revealRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(18, 0, 0, 4) };
-        var revealBtn = new Button { Content = "Révéler la combo (3s)", Padding = new Thickness(10, 4, 10, 4) };
+        var revealBtn = new Button { Content = "Révéler le combo (3s)", Padding = new Thickness(10, 4, 10, 4) };
         revealBtn.Click += (_, _) => AppState.RequestQuizReveal();
         revealRow.Children.Add(revealBtn);
         panel.Children.Add(revealRow);
-        panel.Children.Add(HelpText("Force à se souvenir de la combo plutôt que de la lire. Ctrl+Alt+I (en jeu) ou ce bouton révèlent temporairement (3s) les étapes masquées."));
+        panel.Children.Add(HelpText("Force à se souvenir du combo plutôt que de le lire. Ctrl+Alt+I (en jeu) ou ce bouton révèlent temporairement (3s) les étapes masquées."));
 
         var gamepadStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 8, 0, 4) };
         gamepadStatus.Text = AppState.Gamepad.Connected ? "Manette détectée." : "Aucune manette détectée (facultatif — voir l'onglet Touches pour assigner des boutons).";
         panel.Children.Add(gamepadStatus);
 
-        panel.Children.Add(SectionTitle("Session"));
+        advancedPanel.Children.Add(SectionTitle("Session"));
         var sessionInfo = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap };
         UpdateSessionInfo(sessionInfo);
-        panel.Children.Add(sessionInfo);
+        advancedPanel.Children.Add(sessionInfo);
 
         var sessionRow = new StackPanel { Orientation = Orientation.Horizontal };
         var refreshBtn = new Button { Content = "Actualiser", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0) };
@@ -339,9 +363,23 @@ public partial class ControlPanelWindow : Window
         var exportSessionBtn = new Button { Content = "Exporter la session (CSV)", Padding = new Thickness(10, 4, 10, 4) };
         exportSessionBtn.Click += (_, _) => ExportSessionCsv();
         sessionRow.Children.Add(exportSessionBtn);
-        panel.Children.Add(sessionRow);
+        advancedPanel.Children.Add(sessionRow);
 
-        _unsubscribeCurrentTab = () => AppState.CaptureSuspendedChanged -= SuspendHandler;
+        var advancedExpander = new Expander
+        {
+            Header = "Réglages avancés",
+            Foreground = TextColor,
+            IsExpanded = false,
+            Margin = new Thickness(0, 20, 0, 0),
+            Content = advancedPanel,
+        };
+        panel.Children.Add(advancedExpander);
+
+        _unsubscribeCurrentTab = () =>
+        {
+            AppState.CaptureSuspendedChanged -= SuspendHandler;
+            AppState.OverlayHiddenChanged -= HideHandler;
+        };
 
         return Wrap(panel);
     }
@@ -384,6 +422,7 @@ public partial class ControlPanelWindow : Window
 
     private static string LockLabel() => AppState.Locked ? "Déverrouiller l'overlay" : "Verrouiller l'overlay";
     private static string SuspendLabel() => AppState.CaptureSuspended ? "Reprendre la capture" : "Suspendre la capture (hors du jeu)";
+    private static string HideOverlayLabel() => AppState.OverlayHidden ? "Réafficher l'overlay" : "Masquer complètement l'overlay";
 
     // ================= Touches =================
 
@@ -621,6 +660,7 @@ public partial class ControlPanelWindow : Window
                     : AppState.Settings.TrainingWeaponFilter;
                 importPresetsBtn.Content = "Importer les 5 combos de cette arme";
                 importPresetsBtn.IsEnabled = _weaponFilterCombo.SelectedItem as string != "Toutes les armes";
+                importPresetsBtn.Visibility = Visibility.Visible;
                 weaponHelpText.Text = "Filtre la liste ci-dessous et les combos cyclées par Ctrl+Alt+K sur l'arme choisie. « Importer » ajoute les true combos vérifiés pour cette arme si elles n'y sont pas déjà.";
             }
             else
@@ -633,9 +673,10 @@ public partial class ControlPanelWindow : Window
                 _weaponFilterCombo.SelectedItem = weapons.Contains(AppState.Settings.TrainingWeaponFilter)
                     ? AppState.Settings.TrainingWeaponFilter
                     : allLabel;
-                importPresetsBtn.Content = $"Importer les combos de {character}";
-                importPresetsBtn.IsEnabled = true;
-                weaponHelpText.Text = $"Combos Signature de {character} + combos génériques de ses {weapons.Count} arme(s). « Importer » ajoute les deux d'un coup.";
+                // Les combos du personnage sont déjà importés automatiquement à sa sélection
+                // (voir _legendFilterCombo.SelectionChanged) — pas besoin d'un bouton ici.
+                importPresetsBtn.Visibility = Visibility.Collapsed;
+                weaponHelpText.Text = $"Combos Signature de {character} + combos génériques de ses {weapons.Count} arme(s), importés automatiquement.";
             }
         }
 
@@ -646,6 +687,7 @@ public partial class ControlPanelWindow : Window
             // Le filtre d'arme précédent peut ne plus avoir de sens pour ce personnage (ex. "Marteau"
             // choisi puis bascule sur "Ada", qui ne joue pas Marteau) — repart sur "toutes ses armes".
             AppState.SetTrainingWeaponFilter("");
+            if (selected != "Tous les personnages") AppState.ImportCharacterPresets(selected);
             RefreshWeaponFilterOptions();
             RefreshCombosList();
         };
@@ -741,16 +783,16 @@ public partial class ControlPanelWindow : Window
 
         var ioRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
 
-        var exportBtn = new Button { Content = "Exporter la combo sélectionnée", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0) };
+        var exportBtn = new Button { Content = "Exporter le combo sélectionné", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0) };
         exportBtn.Click += (_, _) => ExportSelectedCombo();
         ioRow.Children.Add(exportBtn);
 
-        var importBtn = new Button { Content = "Importer une combo", Padding = new Thickness(10, 4, 10, 4) };
+        var importBtn = new Button { Content = "Importer un combo", Padding = new Thickness(10, 4, 10, 4) };
         importBtn.Click += (_, _) => ImportCombo();
         ioRow.Children.Add(importBtn);
 
         panel.Children.Add(ioRow);
-        panel.Children.Add(HelpText("Permet de partager une combo (fichier .json) entre deux installations ou avec quelqu'un d'autre."));
+        panel.Children.Add(HelpText("Permet de partager un combo (fichier .json) entre deux installations ou avec quelqu'un d'autre."));
 
         var statsBtn = new Button { Content = "Voir les stats de précision par action", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         statsBtn.Click += (_, _) => ShowActionStats();
@@ -775,7 +817,7 @@ public partial class ControlPanelWindow : Window
         var idx = SelectedAbsoluteIndex();
         if (idx < 0)
         {
-            MessageBox.Show("Sélectionne d'abord une combo dans la liste.", "Aucune combo sélectionnée", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Sélectionne d'abord un combo dans la liste.", "Aucun combo sélectionné", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -818,7 +860,7 @@ public partial class ControlPanelWindow : Window
         if (unknownActions.Count > 0)
         {
             MessageBox.Show(
-                $"Cette combo référence des actions qui n'existent pas dans ta configuration de touches : {string.Join(", ", unknownActions)}.\n" +
+                $"Ce combo référence des actions qui n'existent pas dans ta configuration de touches : {string.Join(", ", unknownActions)}.\n" +
                 "Importée quand même, mais elle ne pourra pas être validée en jeu tant que ces actions n'existent pas (onglet Touches).",
                 "Actions inconnues", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
@@ -834,7 +876,7 @@ public partial class ControlPanelWindow : Window
         var stats = AppState.Stats.OrderByDescending(s => s.Failures == 0 ? 0 : (double)s.Failures / (s.Successes + s.Failures)).ToList();
         if (stats.Count == 0)
         {
-            MessageBox.Show("Pas encore de données — joue une combo en mode Tutoriel pour commencer à accumuler des stats.", "Stats de précision", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Pas encore de données — joue un combo en mode Tutoriel pour commencer à accumuler des stats.", "Stats de précision", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -847,7 +889,7 @@ public partial class ControlPanelWindow : Window
         MessageBox.Show(string.Join("\n", lines), "Stats de précision par action", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private static string RecordLabel() => AppState.Recording ? "■ Arrêter l'enregistrement" : "● Enregistrer une combo";
+    private static string RecordLabel() => AppState.Recording ? "■ Arrêter l'enregistrement" : "● Enregistrer un combo";
 
     /// <summary>Résout la sélection de la ListBox (indexée sur la liste filtrée par arme) en
     /// index absolu dans AppState.Combos.</summary>
@@ -889,15 +931,15 @@ public partial class ControlPanelWindow : Window
         if (_combosList.Items.Count == 0)
         {
             // Sans ce message, une liste vide (cas du tout premier lancement, ou
-            // d'un filtre d'arme/légend sans combo importée) ressemble à un bug
+            // d'un filtre d'arme/légend sans combo importé) ressemble à un bug
             // plutôt qu'à un état normal — rien n'indiquait quoi faire ensuite.
             string hint;
             if (string.IsNullOrEmpty(filter) && string.IsNullOrEmpty(legendFilter))
-                hint = "Aucune combo pour l'instant. Choisis une arme ci-dessus puis « Importer les 5 combos de cette arme », ou clique « Créer manuellement » / « Enregistrer une combo » plus bas.";
+                hint = "Aucun combo pour l'instant. Choisis une arme ci-dessus puis « Importer les 5 combos de cette arme », ou clique « Créer manuellement » / « Enregistrer un combo » plus bas.";
             else if (!string.IsNullOrEmpty(legendFilter))
-                hint = $"Aucune combo pour « {legendFilter} »{(string.IsNullOrEmpty(filter) ? "" : $" sur {filter}")}. Clique « Importer les combos de {legendFilter} » ci-dessus (certains personnages n'ont pas de combo listé), ou choisis « Tous les personnages ».";
+                hint = $"Aucun combo pour « {legendFilter} »{(string.IsNullOrEmpty(filter) ? "" : $" sur {filter}")}. Clique « Importer les combos de {legendFilter} » ci-dessus (certains personnages n'ont pas de combo listé), ou choisis « Tous les personnages ».";
             else
-                hint = $"Aucune combo pour « {filter} ». Clique « Importer les 5 combos de cette arme » ci-dessus, ou choisis « Toutes les armes » pour voir les autres combos.";
+                hint = $"Aucun combo pour « {filter} ». Clique « Importer les 5 combos de cette arme » ci-dessus, ou choisis « Toutes les armes » pour voir les autres combos.";
             _combosList.Items.Add(new ListBoxItem
             {
                 Content = new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, Foreground = SubtleText },
@@ -1053,16 +1095,52 @@ public partial class ControlPanelWindow : Window
         {
             ("Ctrl+Alt+O", "Verrouiller / déverrouiller l'overlay"),
             ("Ctrl+Alt+P", "Changer de mode (parmi les favoris)"),
-            ("Ctrl+Alt+K", "Changer la combo active (mode Tutoriel)"),
-            ("Ctrl+Alt+R", "Démarrer / arrêter l'enregistrement d'une combo"),
+            ("Ctrl+Alt+K", "Changer le combo actif (mode Tutoriel)"),
+            ("Ctrl+Alt+R", "Démarrer / arrêter l'enregistrement d'un combo"),
             ("Ctrl+Alt+U", "Ouvrir / donner le focus au panneau de contrôle"),
-            ("Ctrl+Alt+I", "Révéler temporairement la combo (mode révision)"),
+            ("Ctrl+Alt+I", "Révéler temporairement le combo (« Cacher les étapes »)"),
             ("Ctrl+Alt+H", "Suspendre / reprendre la capture (utile hors du jeu)"),
+            ("Ctrl+Alt+M", "Masquer / afficher complètement l'overlay (sans fermer l'app)"),
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
             row.Children.Add(new TextBlock { Text = keys, Foreground = TextColor, FontFamily = new FontFamily("Consolas"), Width = 110 });
             row.Children.Add(new TextBlock { Text = desc, Foreground = SubtleText });
+            panel.Children.Add(row);
+        }
+
+        panel.Children.Add(new TextBlock { Text = "Raccourcis manette (Start + bouton)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
+        foreach (var (chord, desc) in new[]
+        {
+            ("Start + RB", "Combo suivante"),
+            ("Start + LB", "Combo précédente"),
+            ("Start + Y", "Changer de mode"),
+            ("Start + Back", "Suspendre / reprendre la capture"),
+            ("Start + X", "Ouvrir le panneau de contrôle"),
+        })
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+            row.Children.Add(new TextBlock { Text = chord, Foreground = TextColor, FontFamily = new FontFamily("Consolas"), Width = 110 });
+            row.Children.Add(new TextBlock { Text = desc, Foreground = SubtleText });
+            panel.Children.Add(row);
+        }
+        panel.Children.Add(HelpText("Fonctionne uniquement si les boutons manette utilisés (LB/RB/X/Y/Back) ne sont pas déjà réassignés à une action de jeu dans l'onglet Touches — sinon les deux se déclenchent en même temps quand Start est maintenu."));
+
+        panel.Children.Add(new TextBlock { Text = "Glossaire (FR ↔ notation communautaire)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
+        panel.Children.Add(HelpText("Les guides Brawlhalla et la communauté utilisent leur propre notation (dLight, nSig, GC...) — voici la correspondance avec les noms d'action de cette app."));
+        foreach (var (fr, notation) in new[]
+        {
+            ("Att. légère", "Light (nLight neutre, dLight bas, sLight latéral)"),
+            ("Att. forte", "Signature / Sig (nSig, dSig, sSig — même bouton que Light, pas un bouton séparé)"),
+            ("Esquive", "Dodge — tenue en l'air juste après un saut : Gravity Cancel (GC)"),
+            ("Saut", "Jump (au sol ou en l'air : Air Jump)"),
+            ("Lancer", "Item Throw / Unarm"),
+            ("Direction + Att. légère/forte en l'air", "nAir / sAir / dAir selon la direction"),
+        })
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+            row.Children.Add(new TextBlock { Text = fr, Foreground = TextColor, Width = 220, TextWrapping = TextWrapping.Wrap });
+            row.Children.Add(new TextBlock { Text = notation, Foreground = SubtleText, Width = 300, TextWrapping = TextWrapping.Wrap });
             panel.Children.Add(row);
         }
 

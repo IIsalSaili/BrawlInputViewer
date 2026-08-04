@@ -21,20 +21,28 @@ public sealed class Combo
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
 
-    /// <summary>Nom de l'arme ciblée par cette combo (voir WeaponComboPresets.Weapons),
-    /// vide pour une combo perso non liée à une arme précise.</summary>
+    /// <summary>Nom de l'arme ciblée par ce combo (voir WeaponComboPresets.Weapons),
+    /// vide pour un combo perso non lié à une arme précise.</summary>
     public string Weapon { get; set; } = "";
 
-    /// <summary>Nom du légend ciblé par cette combo (voir LegendComboPresets.Legends), pour les
+    /// <summary>Nom du légend ciblé par ce combo (voir LegendComboPresets.Legends), pour les
     /// combos qui n'existent que sur les armes/signatures d'un légend précis (ex. "Ada Blasters").
-    /// Vide pour une combo générique d'arme ou perso non liée à un légend.</summary>
+    /// Vide pour un combo générique d'arme ou perso non lié à un légend.</summary>
     public string Legend { get; set; } = "";
 
     public List<ComboStep> Steps { get; set; } = new();
     public int DefaultToleranceMs { get; set; } = 400;
     public MatchMode MatchMode { get; set; } = MatchMode.Strict;
 
-    /// <summary>Note optionnelle indiquant si cette combo est un "true combo" seulement
+    /// <summary>Dex minimum requis pour que ce combo soit humainement exécutable (mécanique
+    /// Brawlhalla que l'app ne modélise pas autrement : le Dex d'une légende détermine son délai de
+    /// récupération après une attaque, donc la fenêtre pour enchaîner). Null = pas de seuil connu
+    /// (combo perso créé manuellement, ou seuil non précisé par la source). Sert uniquement à
+    /// afficher/filtrer par faisabilité (voir LegendStats.MaxReachableDex) — l'app ne bloque jamais
+    /// la validation d'un combo sur ce critère, seulement sa visibilité dans les listes.</summary>
+    public int? MinDex { get; set; }
+
+    /// <summary>Note optionnelle indiquant si ce combo est un "true combo" seulement
     /// à faible pourcentage de dégâts de l'adversaire (mécanique Brawlhalla : le
     /// knockback augmente avec les dégâts déjà subis, donc un enchaînement qui connecte
     /// à 0% peut laisser l'adversaire s'échapper/DI à haut %). Vide = non renseigné,
@@ -45,7 +53,7 @@ public sealed class Combo
     public string DamageNote { get; set; } = "";
 
     // Performance cumulée, persistée dans combos.json (historique de session
-    // guidée : combien de fois cette combo a été tentée/réussie, sa meilleure
+    // guidée : combien de fois ce combo a été tenté/réussi, sa meilleure
     // série jamais atteinte, et si elle a déjà atteint le seuil de "maîtrise"
     // configuré dans les réglages au moins une fois).
     public int BestStreak { get; set; }

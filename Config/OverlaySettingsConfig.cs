@@ -18,6 +18,12 @@ public static class OverlaySettingsConfig
     {
         WasFirstRun = !File.Exists(ConfigPath);
         var settings = JsonFileStore.Load<OverlaySettings?>(ConfigPath, null) ?? new OverlaySettings();
+
+        // Migration : une installation qui existait déjà avant l'ajout de l'écran de fourche
+        // (OnboardingCompleted absent du JSON, donc null après désérialisation) ne doit pas se
+        // le voir imposer après une mise à jour — seul un vrai tout premier lancement le montre.
+        if (!WasFirstRun && settings.OnboardingCompleted is null) settings.OnboardingCompleted = true;
+
         if (WasFirstRun) Save(settings);
         return settings;
     }

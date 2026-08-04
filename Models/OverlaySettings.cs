@@ -28,6 +28,17 @@ public sealed class OverlaySettings
 
     public bool LaunchAtStartup { get; set; }
 
+    /// <summary>Null = pas encore vu l'écran de fourche "Tu es plutôt…" (voir OnboardingWindow).
+    /// Distinct de OverlaySettingsConfig.WasFirstRun : une installation qui existait déjà avant
+    /// l'ajout de cet écran (settings.json présent mais champ absent du JSON, donc null après
+    /// désérialisation) ne doit pas se le voir imposer rétroactivement — seul un vrai tout premier
+    /// lancement (WasFirstRun) déclenche la fourche, voir OverlaySettingsConfig.LoadOrCreateDefault.</summary>
+    public bool? OnboardingCompleted { get; set; }
+
+    /// <summary>Profil choisi à la fourche du premier lancement ("Débutant"/"Connaisseur"/"Expert"),
+    /// affiché en contexte sur l'écran de reprise. Purement informatif, ne pilote aucun comportement.</summary>
+    public string OnboardingProfile { get; set; } = "";
+
     /// <summary>Nom du profil de touches actif (voir KeyBindConfig.ListProfiles/LoadProfile).</summary>
     public string ActiveProfile { get; set; } = KeyBindConfig.DefaultProfileName;
 
@@ -37,7 +48,7 @@ public sealed class OverlaySettings
     /// <summary>Modes inclus dans le cycle rapide Ctrl+Alt+P.</summary>
     public List<int> FavoriteModes { get; set; } = new() { 0, 1, 2 };
 
-    /// <summary>Si vrai, une combo ratée ne remet pas la série de réussites à zéro.</summary>
+    /// <summary>Si vrai, un combo raté ne remet pas la série de réussites à zéro.</summary>
     public bool KeepStreakOnFail { get; set; }
 
     /// <summary>Nombre de lignes conservées dans l'historique de coups.</summary>
@@ -46,15 +57,15 @@ public sealed class OverlaySettings
     /// <summary>Bips de succès/échec en mode Tutoriel.</summary>
     public bool SoundEnabled { get; set; }
 
-    /// <summary>Après une combo réussie, passe automatiquement à la combo suivante de la liste.</summary>
+    /// <summary>Après un combo réussi, passe automatiquement au combo suivant de la liste.</summary>
     public bool ChainCombos { get; set; }
 
-    /// <summary>Nombre de réussites consécutives (série) requis avant de passer à la combo
-    /// suivante en mode enchaînement — permet une "session guidée" où chaque combo doit être
-    /// maîtrisée (répétée N fois d'affilée) avant de progresser, pas juste réussie une fois.</summary>
+    /// <summary>Nombre de réussites consécutives (série) requis avant de passer au combo
+    /// suivant en mode enchaînement — permet une "session guidée" où chaque combo doit être
+    /// maîtrisé (répété N fois d'affilée) avant de progresser, pas juste réussi une fois.</summary>
     public int ChainStreakThreshold { get; set; } = 1;
 
-    /// <summary>Mode révision : masque les étapes pas encore jouées de la combo active (Ctrl+Alt+I pour révéler temporairement).</summary>
+    /// <summary>Mode révision : masque les étapes pas encore jouées du combo actif (Ctrl+Alt+I pour révéler temporairement).</summary>
     public bool QuizMode { get; set; }
 
     /// <summary>Arme sur laquelle s'entraîner (voir WeaponComboPresets.Weapons) : filtre la liste

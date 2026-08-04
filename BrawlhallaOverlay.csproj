@@ -27,6 +27,11 @@
          renders officiels récupérés sur brawlhalla.com/legends/, voir Config/LegendComboPresets.cs
          et Windows/MainWindow.xaml.cs (LegendPortraitFileName) pour le détail du sourcing. -->
     <Resource Include="Assets\Legends\*.png" />
+    <!-- Logo de l'app (icône de tray + icône des fenêtres bordées) — logo officiel Brawlhalla
+         fourni directement par l'utilisateur (logo\logo_app.png), pas un logo custom dessiné pour
+         cet outil. Utilisé sciemment malgré l'affiliation visuelle que ça implique (confirmé par
+         l'utilisateur) ; remplace l'ancienne icône "B" dessinée au runtime dans MainWindow.CreateTrayIcon. -->
+    <Resource Include="Assets\AppLogo.png" />
   </ItemGroup>
 
 </Project>

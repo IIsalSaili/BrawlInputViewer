@@ -20,8 +20,8 @@ public sealed class ComboStep
 
     /// <summary>Si vrai, cette étape tolère n'importe quelle direction tenue en plus
     /// de ce qui est requis, même en MatchMode.Strict (ex. un coup qui demande de se
-    /// décaler pour toucher la hitbox, sans que ce décalage fasse partie de la combo
-    /// elle-même). Sans effet en IgnoreExtraneous, qui tolère déjà tout excédent de
+    /// décaler pour toucher la hitbox, sans que ce décalage fasse partie du combo
+    /// lui-même). Sans effet en IgnoreExtraneous, qui tolère déjà tout excédent de
     /// mouvement sur toutes les étapes.</summary>
     public bool FreeMovement { get; set; }
 }

@@ -31,7 +31,7 @@ public partial class StartupWindow : Window
     private ComboBox _characterCombo = null!;
     private ComboBox _weaponCombo = null!;
     private ListBox _combosList = null!;
-    private readonly List<int> _visibleIndices = new(); // -1 = "aucune combo (juste l'overlay)"
+    private readonly List<int> _visibleIndices = new(); // -1 = "aucun combo (juste l'overlay)"
     private Image _portraitImage = null!;
     private RadioButton _modeHistorique = null!;
     private RadioButton _modeArrows = null!;
@@ -110,7 +110,7 @@ public partial class StartupWindow : Window
         });
         titles.Children.Add(new TextBlock
         {
-            Text = "Choisis ton personnage, ta combo et ton mode d'affichage, puis lance l'overlay en jeu.",
+            Text = "Choisis ton personnage, ton combo et ton mode d'affichage, puis lance l'overlay en jeu.",
             FontSize = 12,
             Foreground = SubtleText,
             TextWrapping = TextWrapping.Wrap,
@@ -144,8 +144,12 @@ public partial class StartupWindow : Window
     {
         var panel = new StackPanel { Margin = new Thickness(24, 8, 24, 24) };
 
+        panel.Children.Add(BuildTutorialBanner());
+
+        var resumeBanner = BuildResumeBanner();
+        if (resumeBanner is not null) panel.Children.Add(resumeBanner);
+
         panel.Children.Add(SectionTitle("Personnage"));
-        var characterRow = new StackPanel { Orientation = Orientation.Horizontal };
 
         _portraitImage = new Image
         {
@@ -155,16 +159,42 @@ public partial class StartupWindow : Window
             Visibility = Visibility.Collapsed,
             Clip = new RectangleGeometry(new Rect(0, 0, 48, 48), 6, 6),
         };
-        characterRow.Children.Add(_portraitImage);
 
+        // ComboBox conservée hors de l'arbre visuel : elle reste la source de vérité de la
+        // sélection (SelectionChanged pilote RefreshWeaponOptions/RefreshPortrait/RefreshCombosList
+        // déjà écrits pour elle), mais l'interaction réelle passe par la grille de portraits
+        // ci-dessous (§5.1 écran B / P1-7 du plan UX onboarding) plutôt qu'une liste de 30 lignes
+        // de texte — cliquer un portrait fixe juste SelectedItem, ce qui redéclenche tout le reste
+        // sans dupliquer la logique de filtre.
         var characterItems = new List<string> { "Tous les personnages" };
         characterItems.AddRange(LegendComboPresets.Legends);
-        _characterCombo = new ComboBox { Width = 260, ItemsSource = characterItems, VerticalAlignment = VerticalAlignment.Center };
+        _characterCombo = new ComboBox { ItemsSource = characterItems, Visibility = Visibility.Collapsed };
         _characterCombo.SelectedItem = string.IsNullOrEmpty(AppState.Settings.TrainingLegendFilter)
             ? "Tous les personnages"
             : AppState.Settings.TrainingLegendFilter;
-        characterRow.Children.Add(_characterCombo);
-        panel.Children.Add(characterRow);
+
+        // Grille qui s'enroule sur plusieurs lignes plutôt qu'une seule ligne à défilement
+        // horizontal : avec 69 légendes (Version 17), une seule ligne horizontale ne tenait plus à
+        // l'écran, et la molette de souris (verticale) ne fait rien sur un ScrollViewer
+        // horizontal-only par défaut dans WPF — inaccessible sans un vrai support de scroll
+        // horizontal (glisser la barre au pixel près). Un WrapPanel dans une Grid à colonne "Star"
+        // (donc de largeur bornée par la fenêtre, contrairement à un StackPanel horizontal qui
+        // donnerait une largeur infinie et empêcherait tout retour à la ligne) profite du défilement
+        // vertical de toute la page (déjà fonctionnel, voir le ScrollViewer de Build()) au lieu d'en
+        // ajouter un second imbriqué.
+        var characterSection = new Grid();
+        characterSection.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        characterSection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(_portraitImage, 0);
+        var characterGrid = new WrapPanel();
+        Grid.SetColumn(characterGrid, 1);
+        characterSection.Children.Add(_portraitImage);
+        characterSection.Children.Add(characterGrid);
+
+        characterGrid.Children.Add(BuildCharacterTile(null, "Tous"));
+        foreach (var legend in LegendComboPresets.Legends) characterGrid.Children.Add(BuildCharacterTile(legend, legend));
+
+        panel.Children.Add(characterSection);
 
         panel.Children.Add(SectionTitle("Arme"));
         var weaponRow = new StackPanel { Orientation = Orientation.Horizontal };
@@ -191,6 +221,7 @@ public partial class StartupWindow : Window
                     : AppState.Settings.TrainingWeaponFilter;
                 importBtn.Content = "Importer les 5 combos de cette arme";
                 importBtn.IsEnabled = _weaponCombo.SelectedItem as string != "Toutes les armes";
+                importBtn.Visibility = Visibility.Visible;
                 weaponHelp.Text = "Filtre la liste de combos ci-dessous sur l'arme choisie. « Importer » ajoute les true combos vérifiés pour cette arme si elles n'y sont pas déjà.";
             }
             else
@@ -203,9 +234,10 @@ public partial class StartupWindow : Window
                 _weaponCombo.SelectedItem = weapons.Contains(AppState.Settings.TrainingWeaponFilter)
                     ? AppState.Settings.TrainingWeaponFilter
                     : allLabel;
-                importBtn.Content = $"Importer les combos de {character}";
-                importBtn.IsEnabled = true;
-                weaponHelp.Text = $"Combos Signature de {character} + combos génériques de ses {weapons.Count} arme(s). « Importer » ajoute les deux d'un coup.";
+                // Les combos du personnage sont déjà importés automatiquement à sa sélection
+                // (voir _characterCombo.SelectionChanged) — pas besoin d'un bouton ici.
+                importBtn.Visibility = Visibility.Collapsed;
+                weaponHelp.Text = $"Combos Signature de {character} + combos génériques de ses {weapons.Count} arme(s), importés automatiquement.";
             }
         }
 
@@ -248,6 +280,7 @@ public partial class StartupWindow : Window
             var selected = _characterCombo.SelectedItem as string ?? "Tous les personnages";
             AppState.SetTrainingLegendFilter(selected == "Tous les personnages" ? "" : selected);
             AppState.SetTrainingWeaponFilter("");
+            if (selected != "Tous les personnages") AppState.ImportCharacterPresets(selected);
             RefreshWeaponOptions();
             RefreshPortrait();
             RefreshCombosList();
@@ -292,7 +325,7 @@ public partial class StartupWindow : Window
         {
             // Choisir une vraie combo n'a d'intérêt qu'en mode Tutoriel (seul mode qui
             // l'affiche) — bascule automatiquement dessus pour éviter de lancer en mode
-            // Historique après avoir pourtant choisi une combo précise.
+            // Historique après avoir pourtant choisi un combo précis.
             var idx = _combosList.SelectedIndex;
             if (idx >= 0 && idx < _visibleIndices.Count && _visibleIndices[idx] >= 0)
             {
@@ -303,21 +336,201 @@ public partial class StartupWindow : Window
         panel.Children.Add(SectionTitle("Mode d'affichage en jeu"));
         var modeRow = new StackPanel { Orientation = Orientation.Horizontal };
         _modeHistorique = new RadioButton { Content = "Historique", GroupName = "mode", Foreground = TextColor, Margin = new Thickness(0, 0, 20, 0) };
-        _modeArrows = new RadioButton { Content = "Grandes flèches", GroupName = "mode", Foreground = TextColor, Margin = new Thickness(0, 0, 20, 0) };
+        _modeArrows = new RadioButton { Content = "Grand affichage", GroupName = "mode", Foreground = TextColor, Margin = new Thickness(0, 0, 20, 0) };
         _modeTutorial = new RadioButton { Content = "Tutoriel", GroupName = "mode", Foreground = TextColor };
         modeRow.Children.Add(_modeHistorique);
         modeRow.Children.Add(_modeArrows);
         modeRow.Children.Add(_modeTutorial);
-        switch (AppState.Settings.DefaultMode)
+        if (AppState.CombosOnlyMode)
+        {
+            // Désactivé temporairement sur demande explicite de l'utilisateur — voir
+            // AppState.CombosOnlyMode. Radios gardées visibles mais grisées plutôt que retirées :
+            // ça reste visible que ces modes existent, juste indisponibles pour l'instant.
+            _modeHistorique.IsEnabled = false;
+            _modeArrows.IsEnabled = false;
+            _modeTutorial.IsChecked = true;
+        }
+        else switch (AppState.Settings.DefaultMode)
         {
             case 1: _modeArrows.IsChecked = true; break;
             case 2: _modeTutorial.IsChecked = true; break;
             default: _modeHistorique.IsChecked = true; break;
         }
         panel.Children.Add(modeRow);
-        panel.Children.Add(HelpText("Rappel : le mode Tutoriel affiche la combo choisie ci-dessus, validée en temps réel pendant que tu joues. Changeable en jeu avec Ctrl+Alt+P."));
+        panel.Children.Add(HelpText(AppState.CombosOnlyMode
+            ? "Historique et Grand affichage sont temporairement désactivés — seul le mode Tutoriel est disponible pour l'instant."
+            : "Rappel : le mode Tutoriel affiche le combo choisi ci-dessus, validé en temps réel pendant que tu joues. Changeable en jeu avec Ctrl+Alt+P."));
 
         return panel;
+    }
+
+    /// <summary>Accueil de reprise (§5.2 du plan UX onboarding) : pour un revenant, le combo/le
+    /// mode de la session précédente sont déjà connus — proposer un "Reprendre" en un clic plutôt
+    /// que de le refaire choisir personnage/arme/combo depuis zéro. Ne masque rien : le reste de
+    /// l'écran (choix complet) reste juste en dessous pour qui veut changer.</summary>
+    /// <summary>Mise en avant des Leçons (ex-"Parcours", nom qui ne disait rien de son contenu —
+    /// voir CLAUDE.md) en tête d'écran plutôt qu'en petit bouton perdu dans le pied de page à côté
+    /// de "Réglages avancés" : c'est la première chose qu'un joueur qui découvre l'app devrait
+    /// faire, avant même de choisir un personnage, pas une option annexe. Nommé "Leçons" plutôt
+    /// que "Tutoriel" (demandé initialement) pour ne pas entrer en collision avec le mode
+    /// d'affichage "Tutoriel" déjà existant (3ème mode, plus bas sur cet écran) — les deux
+    /// s'appeler pareil aurait recréé exactement la confusion de nommage signalée.</summary>
+    private UIElement BuildTutorialBanner()
+    {
+        var stack = new StackPanel();
+        stack.Children.Add(new TextBlock
+        {
+            Text = "🎓 Leçons — apprends les bases du jeu et de l'app",
+            FontSize = 15,
+            FontWeight = FontWeights.Bold,
+            Foreground = TextColor,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = "Recommandé avant de te lancer : leçons courtes validées en temps réel (sauts, esquive, récupération...).",
+            FontSize = 11,
+            Foreground = SubtleText,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        var tutorialBtn = new Button
+        {
+            Content = "Ouvrir les leçons ▶",
+            Padding = new Thickness(16, 8, 16, 8),
+            FontWeight = FontWeights.Bold,
+            FontSize = 13,
+            Background = AccentGold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22)),
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        tutorialBtn.Click += (_, _) => new ParcoursWindow().Show();
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(stack, 0);
+        Grid.SetColumn(tutorialBtn, 1);
+        grid.Children.Add(stack);
+        grid.Children.Add(tutorialBtn);
+
+        return new Border
+        {
+            Background = CardBg,
+            BorderBrush = AccentGold,
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 14, 16, 14),
+            Margin = new Thickness(0, 0, 0, 16),
+            Child = grid,
+        };
+    }
+
+    private UIElement? BuildResumeBanner()
+    {
+        if (AppState.ActiveComboIndex < 0 || AppState.ActiveComboIndex >= AppState.Combos.Count) return null;
+
+        var combo = AppState.Combos[AppState.ActiveComboIndex];
+        var modeLabel = AppState.Settings.DefaultMode switch { 1 => "Grand affichage", 2 => "Tutoriel", _ => "Historique" };
+
+        var contextParts = new List<string> { $"Mode {modeLabel}" };
+        if (combo.BestStreak > 0) contextParts.Add($"série record {combo.BestStreak}");
+        if (combo.Mastered) contextParts.Add("maîtrisée ✓");
+
+        var stack = new StackPanel();
+        stack.Children.Add(new TextBlock
+        {
+            Text = $"Reprendre — {combo.Name}",
+            FontSize = 15,
+            FontWeight = FontWeights.Bold,
+            Foreground = TextColor,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = string.Join(" · ", contextParts) + " — dernière session",
+            FontSize = 11,
+            Foreground = SubtleText,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        var resumeBtn = new Button
+        {
+            Content = "Reprendre ▶",
+            Padding = new Thickness(16, 8, 16, 8),
+            FontWeight = FontWeights.Bold,
+            Background = AccentGold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22)),
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        resumeBtn.Click += (_, _) => LaunchOverlay();
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(stack, 0);
+        Grid.SetColumn(resumeBtn, 1);
+        grid.Children.Add(stack);
+        grid.Children.Add(resumeBtn);
+
+        return new Border
+        {
+            Background = CardBg,
+            BorderBrush = AccentGold,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 12, 16, 12),
+            Margin = new Thickness(0, 0, 0, 16),
+            Child = grid,
+        };
+    }
+
+    private Border BuildCharacterTile(string? legend, string label)
+    {
+        var image = new Image { Width = 40, Height = 40, Clip = new RectangleGeometry(new Rect(0, 0, 40, 40), 5, 5) };
+        if (legend is not null)
+        {
+            var fileName = legend.Replace(" ", "") + ".png";
+            if (!_portraitCache.TryGetValue(fileName, out var portrait))
+            {
+                try
+                {
+                    portrait = new BitmapImage(new Uri($"pack://application:,,,/Assets/Legends/{fileName}", UriKind.Absolute));
+                    _portraitCache[fileName] = portrait;
+                }
+                catch (IOException)
+                {
+                    portrait = null;
+                }
+            }
+            if (portrait is not null) image.Source = portrait;
+        }
+
+        var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Width = 60 };
+        stack.Children.Add(image);
+        stack.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 9,
+            Foreground = TextColor,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        var tile = new Border
+        {
+            Background = CardBg,
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(4),
+            Margin = new Thickness(3),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = label,
+            Child = stack,
+        };
+        tile.MouseLeftButtonUp += (_, _) => _characterCombo.SelectedItem = legend ?? "Tous les personnages";
+        return tile;
     }
 
     private int SelectedComboIndex() =>
@@ -332,7 +545,7 @@ public partial class StartupWindow : Window
         _combosList.Items.Clear();
         _visibleIndices.Clear();
 
-        _combosList.Items.Add("— Aucune combo sélectionnée (juste l'overlay) —");
+        _combosList.Items.Add("— Aucun combo sélectionné (juste l'overlay) —");
         _visibleIndices.Add(-1);
 
         var filteredAbsIndices = AppState.FilteredComboIndices();
@@ -369,15 +582,20 @@ public partial class StartupWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+        var leftButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
+
+        // Le bouton Leçons (ex-"Parcours") a été déplacé en bannière proéminente en tête
+        // d'écran (BuildTutorialBanner) — plus besoin d'un doublon discret ici.
         var advancedBtn = new Button
         {
             Content = "Réglages avancés…",
             Padding = new Thickness(10, 6, 10, 6),
-            HorizontalAlignment = HorizontalAlignment.Left,
         };
         advancedBtn.Click += (_, _) => OpenAdvancedSettings();
-        Grid.SetColumn(advancedBtn, 0);
-        row.Children.Add(advancedBtn);
+        leftButtons.Children.Add(advancedBtn);
+
+        Grid.SetColumn(leftButtons, 0);
+        row.Children.Add(leftButtons);
 
         var launchBtn = new Button
         {

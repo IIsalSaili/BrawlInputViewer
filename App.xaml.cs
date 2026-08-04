@@ -19,5 +19,16 @@ public partial class App : Application
                 MessageBoxImage.Error);
             args.Handled = true;
         };
+
+        // Pas de StartupUri XAML fixe : le tout premier lancement (OnboardingCompleted
+        // encore null/false) passe par la fourche OnboardingWindow (voir docs/plan_ux_onboarding.md
+        // §5.1) ; tous les suivants vont directement sur l'écran de reprise/config existant
+        // (StartupWindow). Il faut lire AppState.Settings *avant* de choisir la fenêtre, donc
+        // c'est fait ici plutôt que de laisser XAML décider.
+        Window entry = AppState.Settings.OnboardingCompleted == true
+            ? new StartupWindow()
+            : new OnboardingWindow();
+        MainWindow = entry;
+        entry.Show();
     }
 }
