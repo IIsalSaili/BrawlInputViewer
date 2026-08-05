@@ -27,6 +27,12 @@
          renders officiels récupérés sur brawlhalla.com/legends/, voir Config/LegendComboPresets.cs
          et Windows/MainWindow.xaml.cs (LegendPortraitFileName) pour le détail du sourcing. -->
     <Resource Include="Assets\Legends\*.png" />
+    <!-- Icônes d'arme (panneau de combo, mode Tutoriel, à côté du portrait de personnage) —
+         icônes officielles récupérées sur brawlhalla.com/legends/ (même hôte CDN cms.brawlhalla.com
+         que les portraits ci-dessus), une par arme du jeu. Voir Config/WeaponIconAssets.cs pour le
+         mapping nom d'arme -> fichier. -->
+    <Resource Include="Assets\Weapons\*.png" />
+    <Resource Include="Assets\Weapons\*.jpg" />
     <!-- Logo de l'app (icône de tray + icône des fenêtres bordées) — logo officiel Brawlhalla
          fourni directement par l'utilisateur (logo\logo_app.png), pas un logo custom dessiné pour
          cet outil. Utilisé sciemment malgré l'affiliation visuelle que ça implique (confirmé par

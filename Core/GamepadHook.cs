@@ -72,11 +72,22 @@ public sealed class GamepadHook : IDisposable
     private bool _connected;
     private bool _unavailable;
 
+    // Index XInput (0-3) de la manette actuellement suivie, -1 si aucune. Une manette
+    // Bluetooth/branchée après une autre ne s'enregistre pas forcément sur l'index 0 —
+    // interroger uniquement l'index 0 (comportement d'origine) pouvait donc ne jamais
+    // détecter une manette pourtant bien reconnue par Windows. On reste "collé" au même
+    // index tant qu'il répond, pour ne pas sauter d'une manette à l'autre en multi-manette.
+    private int _activeIndex = -1;
+
     public event Action<int>? ButtonDown;
     public event Action<int>? ButtonUp;
     public event Action<bool>? ConnectionChanged;
 
+    /// <summary>Dernier état brut lu (boutons + triggers + sticks), pour un panneau de diagnostic ; ne déclenche aucun event.</summary>
+    public event Action<GamepadSnapshot>? RawStateChanged;
+
     public bool Connected => _connected;
+    public int ActiveIndex => _activeIndex;
 
     public GamepadHook()
     {
@@ -93,28 +104,44 @@ public sealed class GamepadHook : IDisposable
 
     private void Poll()
     {
-        XInputState state;
-        int result;
-        try
+        XInputState state = default;
+        int result = 1; // ERROR_DEVICE_NOT_CONNECTED par défaut si aucun index ne répond
+        int respondingIndex = -1;
+
+        // Sonde l'index déjà actif en premier (chemin chaud le plus courant), puis les 4
+        // index XInput si besoin (première connexion, ou manette débranchée/rebranchée sur
+        // un autre index).
+        foreach (var index in CandidateIndices())
         {
-            result = XInputGetState(0, out state);
-        }
-        catch (DllNotFoundException)
-        {
-            // Pas de runtime XInput sur cette machine (rare, Windows sans DirectX
-            // à jour) : on abandonne le polling plutôt que de spammer l'exception.
-            _unavailable = true;
-            _timer.Stop();
-            return;
-        }
-        catch (EntryPointNotFoundException)
-        {
-            _unavailable = true;
-            _timer.Stop();
-            return;
+            try
+            {
+                result = XInputGetState(index, out state);
+            }
+            catch (DllNotFoundException)
+            {
+                // Pas de runtime XInput sur cette machine (rare, Windows sans DirectX
+                // à jour) : on abandonne le polling plutôt que de spammer l'exception.
+                _unavailable = true;
+                _timer.Stop();
+                return;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _unavailable = true;
+                _timer.Stop();
+                return;
+            }
+
+            if (result == 0)
+            {
+                respondingIndex = index;
+                break;
+            }
         }
 
-        var connectedNow = result == 0;
+        var connectedNow = respondingIndex >= 0;
+        _activeIndex = connectedNow ? respondingIndex : -1;
+
         if (connectedNow != _connected)
         {
             _connected = connectedNow;
@@ -142,7 +169,40 @@ public sealed class GamepadHook : IDisposable
         }
 
         _lastButtons = current;
+
+        if (RawStateChanged is not null)
+        {
+            RawStateChanged.Invoke(new GamepadSnapshot(
+                _activeIndex,
+                current,
+                state.Gamepad.bLeftTrigger,
+                state.Gamepad.bRightTrigger,
+                state.Gamepad.sThumbLX,
+                state.Gamepad.sThumbLY,
+                state.Gamepad.sThumbRX,
+                state.Gamepad.sThumbRY));
+        }
+    }
+
+    private System.Collections.Generic.IEnumerable<int> CandidateIndices()
+    {
+        if (_activeIndex >= 0) yield return _activeIndex;
+        for (var i = 0; i < 4; i++)
+        {
+            if (i != _activeIndex) yield return i;
+        }
     }
 
     public void Dispose() => _timer.Stop();
 }
+
+/// <summary>Instantané en lecture seule de l'état d'une manette, pour l'affichage (panneau de diagnostic périphériques).</summary>
+public readonly record struct GamepadSnapshot(
+    int Index,
+    ushort Buttons,
+    byte LeftTrigger,
+    byte RightTrigger,
+    short LeftStickX,
+    short LeftStickY,
+    short RightStickX,
+    short RightStickY);

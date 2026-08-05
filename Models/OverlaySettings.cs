@@ -1,15 +1,4 @@
-using System.Collections.Generic;
-
 namespace BrawlhallaOverlay;
-
-public enum OverlayPosition
-{
-    BottomLeft,
-    BottomRight,
-    TopLeft,
-    TopRight,
-    Free,
-}
 
 /// <summary>
 /// Persisted, user-editable overlay behavior (Apparence/Général tabs of the
@@ -20,39 +9,21 @@ public sealed class OverlaySettings
 {
     public double Scale { get; set; } = 1.0;
     public double Opacity { get; set; } = 1.0;
-    public OverlayPosition Position { get; set; } = OverlayPosition.BottomLeft;
-
-    // Position mémorisée quand Position == Free (dernier drag manuel).
-    public double FreeLeft { get; set; } = 24;
-    public double FreeTop { get; set; } = 24;
 
     public bool LaunchAtStartup { get; set; }
 
-    /// <summary>Null = pas encore vu l'écran de fourche "Tu es plutôt…" (voir OnboardingWindow).
+    /// <summary>Null = pas encore vu l'écran de fourche "Tu es plutôt…" (voir DashboardWindow).
     /// Distinct de OverlaySettingsConfig.WasFirstRun : une installation qui existait déjà avant
     /// l'ajout de cet écran (settings.json présent mais champ absent du JSON, donc null après
     /// désérialisation) ne doit pas se le voir imposer rétroactivement — seul un vrai tout premier
     /// lancement (WasFirstRun) déclenche la fourche, voir OverlaySettingsConfig.LoadOrCreateDefault.</summary>
     public bool? OnboardingCompleted { get; set; }
 
-    /// <summary>Profil choisi à la fourche du premier lancement ("Débutant"/"Connaisseur"/"Expert"),
-    /// affiché en contexte sur l'écran de reprise. Purement informatif, ne pilote aucun comportement.</summary>
-    public string OnboardingProfile { get; set; } = "";
-
     /// <summary>Nom du profil de touches actif (voir KeyBindConfig.ListProfiles/LoadProfile).</summary>
     public string ActiveProfile { get; set; } = KeyBindConfig.DefaultProfileName;
 
-    /// <summary>Mode affiché au démarrage : 0 = Historique, 1 = Grandes flèches, 2 = Tutoriel.</summary>
-    public int DefaultMode { get; set; }
-
-    /// <summary>Modes inclus dans le cycle rapide Ctrl+Alt+P.</summary>
-    public List<int> FavoriteModes { get; set; } = new() { 0, 1, 2 };
-
     /// <summary>Si vrai, un combo raté ne remet pas la série de réussites à zéro.</summary>
     public bool KeepStreakOnFail { get; set; }
-
-    /// <summary>Nombre de lignes conservées dans l'historique de coups.</summary>
-    public int MaxHistoryEntries { get; set; } = 12;
 
     /// <summary>Bips de succès/échec en mode Tutoriel.</summary>
     public bool SoundEnabled { get; set; }
@@ -84,4 +55,35 @@ public sealed class OverlaySettings
     /// restait toujours calé sur SystemParameters.WorkArea (toujours l'écran principal Windows),
     /// voir docs/audit_features.md §1.4.</summary>
     public int MonitorIndex { get; set; } = -1;
+
+    /// <summary>Code de touche virtuelle (VK) pour "combo suivante"/"combo précédente",
+    /// utilisés en plus de Ctrl+Alt (le préfixe Ctrl+Alt reste fixe comme tous les autres
+    /// raccourcis — seule la touche finale est reconfigurable, via l'onglet Général du panneau
+    /// de contrôle). Défauts : K (suivante, historique — anciennement le seul raccourci
+    /// existant) et J (précédente, nouveau — jusque-là accessible uniquement à la manette via
+    /// Start+LB). Stockés en VK plutôt qu'en nom de touche .NET pour réutiliser directement
+    /// AppState.Hook.KeyDown (qui fournit des vkCode) sans conversion aller-retour.</summary>
+    public int ComboNextVk { get; set; } = 0x4B; // K
+    public int ComboPrevVk { get; set; } = 0x4A; // J
+
+    /// <summary>Codes de touche virtuelle (VK) des autres raccourcis globaux Ctrl+Alt+*, tous
+    /// reconfigurables individuellement (onglet Général, réglages avancés) pour éviter une
+    /// collision irréparable avec un autre logiciel (OBS, Discord, un launcher) sans devoir
+    /// recompiler — auparavant des `const int` figés dans MainWindow.xaml.cs. Le préfixe
+    /// Ctrl+Alt reste fixe comme pour ComboNextVk/ComboPrevVk ; seule la touche finale change.
+    /// Défauts identiques aux anciennes constantes : O = verrouiller, R = enregistrer un combo,
+    /// U = accueil, I = révéler, H = suspendre la capture, M = masquer l'overlay.</summary>
+    public int LockVk { get; set; } = 0x4F; // O
+    public int RecordVk { get; set; } = 0x52; // R
+    public int DashboardVk { get; set; } = 0x55; // U
+    public int RevealVk { get; set; } = 0x49; // I
+    public int SuspendVk { get; set; } = 0x48; // H
+    public int HideVk { get; set; } = 0x4D; // M
+
+    /// <summary>Estompe le panneau du mode Tutoriel (opacité réduite, pas masqué comme
+    /// OverlayHidden) après AutoHideIdleSeconds sans input, pour ne pas polluer l'écran pendant
+    /// les phases sans combat — réapparaît en opacité pleine dès le prochain appui. Désactivé par
+    /// défaut (comportement historique inchangé si l'utilisateur n'active rien).</summary>
+    public bool AutoHideEnabled { get; set; }
+    public int AutoHideIdleSeconds { get; set; } = 6;
 }

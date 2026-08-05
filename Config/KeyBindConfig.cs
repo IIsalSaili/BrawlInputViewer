@@ -14,17 +14,17 @@ public static class KeyBindConfig
     // changes encore tes touches en jeu.
     private static readonly List<KeyBind> Defaults = new()
     {
-        new KeyBind { Action = "Gauche", Keys = new() { "Q" }, Label = "Q", Symbol = "◄", Color = "#5DADE2", Group = "Movement", Slot = "Left" },
-        new KeyBind { Action = "Droite", Keys = new() { "D" }, Label = "D", Symbol = "►", Color = "#2E86C1", Group = "Movement", Slot = "Right" },
-        new KeyBind { Action = "Haut",   Keys = new() { "Z" }, Label = "Z", Symbol = "▲", Color = "#48C9B0", Group = "Movement", Slot = "Up" },
-        new KeyBind { Action = "Bas",    Keys = new() { "S" }, Label = "S", Symbol = "▼", Color = "#229954", Group = "Movement", Slot = "Down" },
+        new KeyBind { Action = "Gauche", Keys = new() { "Q" }, Label = "Q", Group = "Movement", Slot = "Left" },
+        new KeyBind { Action = "Droite", Keys = new() { "D" }, Label = "D", Group = "Movement", Slot = "Right" },
+        new KeyBind { Action = "Haut",   Keys = new() { "Z" }, Label = "Z", Group = "Movement", Slot = "Up" },
+        new KeyBind { Action = "Bas",    Keys = new() { "S" }, Label = "S", Group = "Movement", Slot = "Down" },
 
-        new KeyBind { Action = "Saut",        Keys = new() { "Space" },            Label = "Saut",        Symbol = "⇧", Color = "#58D68D", Group = "Action" },
-        new KeyBind { Action = "Att. légère", Keys = new() { "Left" },              Label = "Att. légère", Symbol = "⚡", Color = "#F4D03F", Group = "Action" },
-        new KeyBind { Action = "Att. forte",  Keys = new() { "Right" },             Label = "Att. forte",  Symbol = "💥", Color = "#E67E22", Group = "Action" },
-        new KeyBind { Action = "Esquive",     Keys = new() { "LeftShift", "Down" }, Label = "Esquive",     Symbol = "💨", Color = "#E74C3C", Group = "Action" },
-        new KeyBind { Action = "Lancer",      Keys = new() { "Up" },                Label = "Lancer",      Symbol = "🎯", Color = "#9B59B6", Group = "Action" },
-        new KeyBind { Action = "Taunt",       Keys = new() { "G" },                 Label = "Taunt",       Symbol = "💬", Color = "#85929E", Group = "Action" },
+        new KeyBind { Action = "Saut",        Keys = new() { "Space" },            Label = "Saut",        Group = "Action" },
+        new KeyBind { Action = "Att. légère", Keys = new() { "Left" },              Label = "Att. légère", Group = "Action" },
+        new KeyBind { Action = "Att. forte",  Keys = new() { "Right" },             Label = "Att. forte",  Group = "Action" },
+        new KeyBind { Action = "Esquive",     Keys = new() { "LeftShift", "Down" }, Label = "Esquive",     Group = "Action" },
+        new KeyBind { Action = "Lancer",      Keys = new() { "Up" },                Label = "Lancer",      Group = "Action" },
+        new KeyBind { Action = "Taunt",       Keys = new() { "G" },                 Label = "Taunt",       Group = "Action" },
     };
 
     /// <summary>Nom du profil de touches par défaut (celui de toujours, fichier keybinds.json).</summary>

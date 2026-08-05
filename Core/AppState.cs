@@ -43,7 +43,6 @@ public static class AppState
         foreach (var weapon in WeaponComboPresets.Weapons) ImportWeaponPresets(weapon);
     }
 
-    public static int ActiveMode { get; private set; }
     public static bool Locked { get; private set; } = true;
     public static int ActiveComboIndex { get; private set; } = _combos.Count > 0 ? 0 : -1;
     public static bool Recording { get; private set; }
@@ -76,7 +75,6 @@ public static class AppState
     public static event Action? BindsChanged;
     public static event Action? CombosChanged;
     public static event Action? SettingsChanged;
-    public static event Action<int>? ModeChanged;
     public static event Action<bool>? LockChanged;
     public static event Action<int>? ActiveComboChanged;
     public static event Action<bool>? RecordingChanged;
@@ -320,30 +318,6 @@ public static class AppState
     {
         OverlaySettingsConfig.Save(Settings);
         SettingsChanged?.Invoke();
-    }
-
-    /// <summary>Désactive temporairement les modes Historique (0) et Grand affichage (1) — demande
-    /// explicite de l'utilisateur ("les modes qui affichent des grosses flèches à l'écran c'est
-    /// immonde"), le temps de retravailler leur rendu. Un seul indicateur à repasser à false pour
-    /// tout réactiver plus tard : le code des deux modes n'est pas supprimé, juste rendu
-    /// inaccessible (UI + AppState). Voir CLAUDE.md pour le détail.</summary>
-    public const bool CombosOnlyMode = true;
-
-    public static void SetMode(int mode)
-    {
-        if (CombosOnlyMode) mode = 2;
-        if (mode is < 0 or > 2 || ActiveMode == mode) return;
-        ActiveMode = mode;
-        ModeChanged?.Invoke(mode);
-    }
-
-    public static void CycleMode()
-    {
-        if (CombosOnlyMode) { SetMode(2); return; }
-        var favorites = Settings.FavoriteModes.Count > 0 ? Settings.FavoriteModes : new List<int> { 0, 1, 2 };
-        var idx = favorites.IndexOf(ActiveMode);
-        var next = favorites[(idx + 1) % favorites.Count];
-        SetMode(next);
     }
 
     public static void SetLocked(bool locked)

@@ -81,9 +81,9 @@ Core/      AppState.cs (état partagé), KeyboardHook.cs (hook clavier bas nivea
            hook clavier), ComboRunner.cs (moteur de validation du mode Tutoriel),
            ComboFamilies.cs (détection/affichage groupé des combos qui
            s'étendent les unes les autres, voir Architecture)
-Windows/   StartupWindow.xaml(.cs) (écran d'accueil, point d'entrée réel de
+Windows/   DashboardWindow.xaml(.cs) (écran d'accueil, point d'entrée réel de
            l'app), MainWindow.xaml(.cs), ControlPanelWindow.xaml(.cs),
-           ComboEditorWindow.xaml(.cs) — les 4 fenêtres WPF
+           ComboEditorWindow.xaml(.cs) — parmi les fenêtres WPF
 docs/      plan.md (doc de design du mode Tutoriel / refonte UI)
 ```
 
@@ -181,7 +181,7 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   au moins une étape de plus à la fin — comparaison par ensemble
   `RequiredActions` par étape, `FreeMovement`/délais ignorés). Sert
   uniquement à l'affichage groupé/indenté dans les listes de combos
-  (`ControlPanelWindow`/`StartupWindow`, via `ComboFamilies.OrderWithFamilies`,
+  (`ControlPanelWindow`/`DashboardWindow`, via `ComboFamilies.OrderWithFamilies`,
   factorisé pour que les deux fenêtres partagent la même logique de tri sans
   la dupliquer) : les membres d'une famille se retrouvent adjacents, triés
   par nombre d'étapes croissant (`Niveau 1`, `Niveau 2`...), avec un badge de
@@ -299,9 +299,7 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   réelles via `AppState.FilteredComboIndices`, au lieu de n'afficher que ce
   qui était accidentellement couvert par l'ancienne table de combos.
 - **Models/OverlaySettings.cs / Config/OverlaySettingsConfig.cs** — réglages
-  persistés dans `settings.json` : échelle, opacité, position de l'overlay
-  (`BottomLeft`/`BottomRight`/`TopLeft`/`TopRight`/`Free`), mode par défaut au
-  démarrage, modes favoris inclus dans le cycle `Ctrl+Alt+P`, option "garder
+  persistés dans `settings.json` : échelle, opacité, option "garder
   la série de réussites même après une combo ratée". `MonitorIndex` (-1 =
   écran principal, défaut) choisit l'écran cible sur un setup multi-moniteur
   (onglet Apparence, `ControlPanelWindow`) : `MainWindow.GetTargetWorkArea`
@@ -336,66 +334,62 @@ rangement, sans impact sur la compilation ni sur le code appelant.
   AZERTY/QWERTY différent selon le PC, ou un jeu de touches distinct par
   contexte (solo/équipe). Les combos et l'apparence restent partagés entre
   profils (seules les touches changent).
-- **Windows/OnboardingWindow.xaml / .xaml.cs** — fourche du tout premier
-  lancement (Version 13, voir plus bas), affichée à la place de
-  `StartupWindow` tant que `Settings.OnboardingCompleted` n'est pas vrai
-  (choix fait dans `App.xaml.cs.OnStartup`, plus de `StartupUri` XAML fixe).
-  Un seul écran commun ("Tu es plutôt…", 3 cartes) puis, selon le choix :
-  Expert → réouvre `StartupWindow` tel quel ; Connaisseur → grille de
-  personnages (portraits `Assets/Legends/*.png`) puis import implicite des
-  combos du personnage choisi (`AppState.ImportCharacterPresets`, plus de
-  bouton "Importer" séparé à deviner) ; Débutant → aucune autre question.
-  Les trois convergent vers un écran "Voilà ce qui va se passer" qui prévient
-  *avant* que l'overlay ne remplace la fenêtre par une surface transparente
-  click-through (au lieu du seul ballon de notification 6s d'avant). Marque
-  `Settings.OnboardingCompleted = true` avant de lancer, pour ne plus jamais
-  se réafficher ensuite. `OverlaySettingsConfig.LoadOrCreateDefault` migre les
-  installations déjà existantes avant cette version (`OnboardingCompleted`
-  absent du JSON → `null` après désérialisation) vers `true` directement,
-  pour ne pas leur imposer rétroactivement une fourche qu'elles n'ont jamais
-  eu besoin de voir. Le profil Débutant ouvre en plus `ParcoursWindow`
-  (Chapitre 0+1 seulement, voir Version 14 — les chapitres 2 à 5 restent à
-  construire et le dit explicitement à l'écran plutôt que de laisser croire
-  qu'un contenu complet existe déjà) à côté de l'overlay lancé en mode
-  Historique.
-- **Windows/StartupWindow.xaml / .xaml.cs** — écran d'accueil complet, ouvert
-  par `App.xaml.cs.OnStartup` (plus de `StartupUri` XAML fixe depuis la
-  Version 13 : le choix entre elle et `OnboardingWindow` se fait en code,
-  voir plus haut) directement pour tout lancement après le tout premier, et
-  via `OnboardingWindow` (profil Expert) pour le tout premier. Fenêtre bordée
-  classique (comme `ControlPanelWindow`, même palette bleu-nuit/or), pas
-  l'overlay in-game. Affiche en tête un **bandeau de reprise**
-  (`BuildResumeBanner`, Version 13) si une combo est déjà active — "Reprendre
-  — <nom>" avec sa série record/statut maîtrisée, un clic relance directement
-  avec la sélection de la session précédente, sans repasser par le choix
-  personnage/arme/combo. Le sélecteur Personnage est une grille de portraits
-  cliquables (`BuildCharacterTile`, Version 13) plutôt qu'une `ComboBox` de 30
-  lignes de texte — techniquement, la `ComboBox` (`_characterCombo`) existe
-  toujours mais hors de l'arbre visuel (`Visibility.Collapsed`) : elle reste
-  la source de vérité de la sélection consommée par `RefreshWeaponOptions`/
-  `RefreshPortrait`/`RefreshCombosList`, un clic sur un portrait se contente
-  de lui réassigner `SelectedItem` pour redéclencher toute la chaîne existante
-  sans la dupliquer. Sélecteur Personnage
-  (`LegendComboPresets.Legends`) → sous-filtre Arme dépendant du personnage
-  (même logique que `ControlPanelWindow.BuildCombosTab`, dupliquée ici plutôt
-  que partagée pour garder les deux fenêtres indépendantes — voir plus bas),
-  portrait du personnage choisi si connu (`Assets/Legends/<Nom>.png`), liste
-  des combos filtrées (`AppState.FilteredComboIndices`) avec en tête une
-  option « Aucune combo sélectionnée (juste l'overlay) », bouton d'import des
-  presets (`AppState.ImportCharacterPresets`/`ImportWeaponPresets`), et 3
-  boutons radio de mode (Historique/Grandes flèches/Tutoriel — sélectionner
-  une vraie combo dans la liste bascule automatiquement sur Tutoriel, seul
-  mode qui l'affiche). Bouton doré « Lancer en jeu » (seul bouton stylé hors
-  palette de boutons par défaut, pour bien le distinguer comme CTA
-  principal) : applique la combo/le mode choisis à `AppState` (`SetActiveCombo`,
-  `SetMode`, persistance dans `Settings.DefaultMode`), instancie `MainWindow`,
-  la pose comme `Application.Current.MainWindow` (nécessaire *avant* de fermer
-  cette fenêtre-ci, sinon `ShutdownMode="OnMainWindowClose"` tue l'app puisque
-  `StartupWindow` était jusque-là la `MainWindow` de l'`Application`), puis se
-  ferme. Bouton secondaire « Réglages avancés… » ouvre `ControlPanelWindow`
-  sans lancer l'overlay (utile pour retoucher touches/apparence avant de
-  lancer). Fermer cette fenêtre sans cliquer « Lancer en jeu » (croix native)
-  quitte l'app normalement, comme n'importe quelle `MainWindow` WPF.
+- **Windows/DashboardWindow.xaml / .xaml.cs** (Version 21, remplace
+  `StartupWindow`+`OnboardingWindow` — voir Historique) — fenêtre d'accueil
+  unifiée, point d'entrée réel de l'app (`App.xaml.cs.OnStartup`, pas de
+  `StartupUri` XAML fixe) ET rouvrable depuis une session déjà en cours
+  (`Ctrl+Alt+U`/clic tray/bouton ⚙ de la barre de contrôle overlay →
+  `MainWindow.OpenDashboard`, `inGameMode: true`). Fenêtre bordée classique
+  (comme `ControlPanelWindow`, même palette bleu-nuit/or), pas l'overlay
+  in-game.
+  Deux modes de fonctionnement pilotés par le constructeur
+  `DashboardWindow(bool inGameMode = false)` :
+  - **`inGameMode: false`** (lancement de l'exe) : si
+    `Settings.OnboardingCompleted` n'est pas vrai, affiche d'abord la fourche
+    du tout premier lancement (`ShowOnboardingFork` — un seul écran commun
+    "Tu es plutôt…", 3 cartes ; Expert → flux complet ci-dessous ;
+    Connaisseur → grille de personnages puis import implicite des combos du
+    personnage choisi ; Débutant → aucune autre question ; les trois
+    convergent vers un écran "Voilà ce qui va se passer" qui prévient *avant*
+    que l'overlay ne remplace la fenêtre). Sinon (ou après la fourche pour le
+    profil Expert), affiche le flux complet (`BuildMainFlow`) : bandeau de
+    reprise (`BuildResumeBanner`, masqué en `inGameMode`, voir plus bas),
+    grille de portraits cliquables (`BuildCharacterTile`) → sélecteur Arme
+    dépendant du personnage → liste de combos filtrées
+    (`AppState.FilteredComboIndices`) → 3 boutons radio de mode. Bouton doré
+    **« ▶ Lancer en jeu »** : applique la sélection à `AppState`
+    (`SetActiveCombo`/`SetMode`), instancie `MainWindow`, la pose comme
+    `Application.Current.MainWindow` (nécessaire *avant* de fermer cette
+    fenêtre, sinon `ShutdownMode="OnMainWindowClose"` tue l'app), puis se
+    ferme.
+  - **`inGameMode: true`** (rouverte pendant qu'un `MainWindow` tourne déjà) :
+    saute toujours la fourche onboarding (un revenant en jeu l'a
+    nécessairement déjà passée), bandeau de reprise masqué (la session en
+    cours EST déjà celle qu'on "reprendrait" — un bandeau ici n'aurait montré
+    qu'une reformulation de ce qui tourne déjà). Bouton renommé
+    **« ✓ Appliquer »** : applique la sélection à `AppState` exactement comme
+    ci-dessus, mais **n'instancie pas de second `MainWindow`** — les mêmes
+    events `ActiveComboChanged`/`ModeChanged` qu'utilisent déjà
+    `Ctrl+Alt+K`/`Ctrl+Alt+P` propagent le changement en direct sur l'overlay
+    déjà ouvert, puis la fenêtre se ferme. **Corrige un bug qui aurait existé
+    si ce garde-fou avait manqué** : sans lui, cliquer sur ce bouton depuis
+    une session en cours aurait créé un deuxième overlay superposé au
+    premier — jamais expédié tel quel, détecté avant tout usage réel (voir
+    Version 21).
+  Sélecteur Personnage : la `ComboBox` (`_characterCombo`) reste la source de
+  vérité de la sélection (hors de l'arbre visuel, `Visibility.Collapsed`),
+  consommée par `RefreshWeaponOptions`/`RefreshPortrait`/`RefreshCombosList` —
+  un clic sur un portrait se contente de lui réassigner `SelectedItem` pour
+  redéclencher toute la chaîne sans la dupliquer. Sélecteur Arme dépendant du
+  personnage : même logique que `ControlPanelWindow.BuildCombosTab`, dupliquée
+  ici plutôt que partagée pour garder les deux fenêtres indépendantes. Bouton
+  secondaire « Réglages avancés… » ouvre `ControlPanelWindow` (inchangé, dans
+  les deux modes) pour les réglages fins (touches/apparence/...) que la
+  Dashboard ne couvre pas. Fermer cette fenêtre sans cliquer le bouton
+  d'action principal (croix native) ne fait rien de spécial : en
+  `inGameMode: false` avant tout lancement ça quitte l'app (comportement WPF
+  standard d'une `MainWindow`) ; en `inGameMode: true` ça ferme juste cette
+  fenêtre secondaire, l'overlay continue de tourner.
 - **Windows/MainWindow.xaml / .xaml.cs** — la fenêtre overlay (in-game
   uniquement, aucune UI de configuration dedans — ça, c'est le rôle de
   `ControlPanelWindow`) :
@@ -407,68 +401,50 @@ rangement, sans impact sur la compilation ni sur le code appelant.
     jeu en dessous. `Ctrl+Alt+O` bascule en mode "déverrouillé" (déplaçable à
     la souris, cesse d'être click-through) pour repositionner l'overlay, puis
     reverrouille.
-  - **Trois modes d'affichage**, basculés via `Ctrl+Alt+P` (cycle parmi les
-    modes marqués favoris dans les réglages, 3 par défaut) ou explicitement
-    depuis le panneau de contrôle :
-    1. **Historique** (mode par défaut) : cluster directionnel ZQSD en
-       triangle inversé (Haut en haut, Gauche/Bas/Droite en dessous) → gros
-       boutons d'action (Saut, Att. légère, Att. forte, Esquive, Lancer,
-       Taunt) → séparateur vertical → historique des coups joués.
-    2. **Grandes flèches** : badges ronds géants collés aux 4 bords de
-       l'écran (mouvement) + gros boutons d'attaque légère/forte au centre en
-       haut + rangée d'icônes secondaires (Saut/Esquive/Lancer/Taunt) —
-       pensé pour être lu d'un coup d'œil sans lire de texte.
-    3. **Tutoriel** : bandeau centré en haut de l'écran (position fixe,
-       ignore le réglage de position général) affichant la combo active sous
-       forme de pastilles reliées par des flèches (étape à venir grisée,
-       étape courante jaune, étape réussie verte, échec = flash rouge si
-       mauvaise touche / orange si trop lent, puis reset), plus le compteur
-       de série et l'historique de touches en dessous. Se branche sur
-       `ComboRunner` (voir plus haut). Sous la pastille courante (à partir de
-       la 2ème étape), une fine barre de progression se vide en temps réel
-       jusqu'à la fenêtre de tolérance (`MaxDelayMs`), pour visualiser le
-       temps restant avant un échec par timeout, avec un texte en secondes
-       en dessous (`0.4s`…) lu depuis la valeur animée de la barre elle-même
-       pour rester synchronisé avec ce que l'œil voit. Réglages associés
-       (onglet Général) : `SoundEnabled` (bip de succès/échec/complétion via
-       `System.Media.SystemSounds`), `QuizMode` (masque en `?` toutes les
-       étapes pas encore jouées — dès le début si la combo n'a pas démarré,
-       façon "mode quiz inversé" : mémoriser avant d'exécuter plutôt que lire
-       puis jouer — `Ctrl+Alt+I` ou le bouton "Révéler" du panneau de
-       contrôle révèlent 3s), `ChainCombos` + `ChainStreakThreshold` (session
-       guidée façon playlist : passe à la combo suivante de la liste ~900ms
-       après avoir atteint N réussites *consécutives* sur la combo active,
-       pas juste après la 1ère — une combo qui atteint ce seuil est marquée
-       `Mastered` de façon persistante, affichée avec un ✓ dans la liste de
-       l'onglet Combos). Chaque combo persiste aussi ses stats de
-       performance cumulées (`BestStreak`/`TotalCompletions`/`TotalAttempts`
-       dans `combos.json`, mises à jour via `AppState.SaveCombosQuiet()` qui
-       ne lève pas `CombosChanged` pour ne pas reconstruire le `ComboRunner`
-       actif — donc perdre sa série en cours — à chaque coup joué).
-    Un badge discret ("Mode : Tutoriel") s'affiche ~1.5s à chaque changement.
-  - Repositionnée selon `Settings.Position` à chaque changement de taille
-    (`SizeChanged`), ou suit le drag à la souris en mode déverrouillé (qui
-    bascule automatiquement `Position` sur `Free`).
-  - Chaque touche/bouton s'allume (opacity 0.25 → 1.0 sur sa `SolidColorBrush`,
-    ou changement de couleur bleu→rouge pour les flèches du mode 2) tant
-    qu'elle est physiquement enfoncée.
-  - **Historique** : une ligne par appui, symbole + nom entre parenthèses
-    (ex. `⚡ (Att. légère)`), les plus récentes en bas, limité à 12 lignes
-    (`MaxHistoryEntries`), fondu d'entrée de 120ms. Panneau partagé entre le
-    mode Historique et le mode Tutoriel (déplacé d'un conteneur à l'autre,
-    pas dupliqué).
-  - **Anti-spam / anti auto-répétition** :
-    - L'auto-répétition Windows (rester appuyé → rafale de `WM_KEYDOWN`) est
-      filtrée via un `HashSet<int> _pressedVks` : un seul événement d'historique
-      par appui physique réel.
-    - Le **mash/spam volontaire** (ex. marteler attaque légère pendant un combo)
-      est fusionné : si la même action revient dans les 500ms
-      (`MergeWindow`), on incrémente un compteur sur la dernière ligne
-      (`Att. légère ×3`) au lieu d'empiler des lignes, avec un petit flash
-      visuel (`Pulse`). Une action différente entre-temps casse la fusion.
+  - **Un seul mode d'affichage : Tutoriel** (les modes Historique et Grand
+    affichage, qui existaient jusqu'à la Version 21, ont été **supprimés**
+    en Version 22 — voir l'entrée d'historique correspondante ; ce n'est pas
+    juste une bascule désactivée, le code a été retiré). Bandeau centré en
+    haut de l'écran (position fixe, toujours ancré en haut) affichant la
+    combo active sous forme de pastilles reliées par des flèches (étape à
+    venir grisée, étape courante jaune, étape réussie verte, échec = flash
+    rouge si mauvaise touche / orange si trop lent, puis reset), plus le
+    compteur de série. Se branche sur `ComboRunner` (voir plus haut). Sous
+    la pastille courante (à partir de la 2ème étape), une fine barre de
+    progression se vide en temps réel jusqu'à la fenêtre de tolérance
+    (`MaxDelayMs`), pour visualiser le temps restant avant un échec par
+    timeout, avec un texte en secondes en dessous (`0.4s`…) lu depuis la
+    valeur animée de la barre elle-même pour rester synchronisé avec ce que
+    l'œil voit. Réglages associés (onglet Général) : `SoundEnabled` (bip de
+    succès/échec/complétion via `System.Media.SystemSounds`), `QuizMode`
+    (masque en `?` toutes les étapes pas encore jouées — dès le début si la
+    combo n'a pas démarré, façon "mode quiz inversé" : mémoriser avant
+    d'exécuter plutôt que lire puis jouer — `Ctrl+Alt+I` ou le bouton
+    "Révéler" du panneau de contrôle révèlent 3s), `ChainCombos` +
+    `ChainStreakThreshold` (session guidée façon playlist : passe à la combo
+    suivante de la liste ~900ms après avoir atteint N réussites
+    *consécutives* sur la combo active, pas juste après la 1ère — une combo
+    qui atteint ce seuil est marquée `Mastered` de façon persistante,
+    affichée avec un ✓ dans la liste de l'onglet Combos). Chaque combo
+    persiste aussi ses stats de performance cumulées
+    (`BestStreak`/`TotalCompletions`/`TotalAttempts` dans `combos.json`,
+    mises à jour via `AppState.SaveCombosQuiet()` qui ne lève pas
+    `CombosChanged` pour ne pas reconstruire le `ComboRunner` actif — donc
+    perdre sa série en cours — à chaque coup joué). Un toast générique
+    (`MainWindow.ShowToast`, ~1.5s auto-fade) affiche divers feedbacks
+    ponctuels (miroir détecté, révélation quiz, combo maîtrisé,
+    enregistrement en cours/rejeté/validé).
+  - Toujours centrée en haut de l'écran (`RepositionTopCenter`, indépendant
+    de tout réglage de position — le réglage `Settings.Position`/
+    `OverlayPosition`, hérité de l'ancien mode Historique déplaçable à la
+    souris, a été retiré avec ce mode).
+  - **Anti-répétition** : l'auto-répétition Windows (rester appuyé → rafale
+    de `WM_KEYDOWN`) est filtrée via un `HashSet<int> _pressedVks` : un seul
+    "coup joué" transmis au `ComboRunner`/à l'export CSV par appui physique
+    réel.
   - **Icône de tray** (`System.Windows.Forms.NotifyIcon`) : clic gauche
     ouvre/donne le focus au panneau de contrôle, clic droit propose un menu
-    (verrouiller, changer de mode, ouvrir le panneau, quitter).
+    (verrouiller, ouvrir le panneau, quitter).
 - **Windows/OverlayControlBarWindow.xaml / .xaml.cs** — petite barre de
   pilotage overlay (Version 13), instanciée par `MainWindow` (champ
   `_controlBar`) en plus du panneau de contrôle et de la barre du tray :
@@ -625,12 +601,12 @@ Actifs partout (hook bas niveau), même jeu au premier plan. Tous préfixés
 
 | Raccourci    | Action                                              |
 |--------------|------------------------------------------------------|
-| `Ctrl+Alt+O` | Verrouiller / déverrouiller l'overlay (déplaçable)    |
-| `Ctrl+Alt+P` | Changer de mode (cycle parmi les modes favoris)       |
-| `Ctrl+Alt+K` | Changer la combo active (mode Tutoriel)               |
+| `Ctrl+Alt+O` | Verrouiller / déverrouiller l'overlay (affiche le bandeau de raccourcis) |
+| `Ctrl+Alt+K` / `J` | Combo suivante / précédente (touches reconfigurables, `Settings.ComboNextVk`/`ComboPrevVk`) |
 | `Ctrl+Alt+R` | Démarrer / arrêter l'enregistrement d'une combo       |
-| `Ctrl+Alt+U` | Ouvrir / donner le focus au panneau de contrôle       |
+| `Ctrl+Alt+U` | Ouvrir / donner le focus à l'accueil (`DashboardWindow`, en mode in-game — voir Version 21) |
 | `Ctrl+Alt+I` | Révéler temporairement (3s) la combo active en mode révision |
+| `Ctrl+Alt+M` | Masquer / afficher complètement l'overlay             |
 | `Ctrl+Alt+H` | Suspendre / reprendre la capture globale (voir `AppState.CaptureSuspended` ci-dessous) |
 
 Tous affichés en toutes lettres (avec leur raccourci en suffixe) dans le menu du
@@ -650,9 +626,8 @@ que `_ctrlDown`/`_altDown` pour les chords clavier :
 |---------------------|-------------------------------------------|
 | `Start + RB`        | Combo suivante (`AppState.CycleCombo`)    |
 | `Start + LB`        | Combo précédente (`AppState.CyclePreviousCombo`, ajouté pour l'occasion) |
-| `Start + Y`         | Changer de mode (`AppState.CycleMode`)    |
 | `Start + Back`      | Suspendre/reprendre la capture            |
-| `Start + X`         | Ouvrir le panneau de contrôle             |
+| `Start + X`         | Ouvrir l'accueil (`DashboardWindow`)      |
 
 Limite assumée et documentée (onglet À propos) : si un de ces boutons
 (LB/RB/X/Y/Back) est *aussi* assigné à une action de jeu dans l'onglet
@@ -1332,9 +1307,8 @@ pas de résolution de conflit plus fine pour l'instant.
      avec stance) demandaient jusqu'à "9" Dex, physiquement impossible.
   Au passage, **tous les modes sauf Tutoriel désactivés temporairement**
   (`AppState.CombosOnlyMode = true`) : "les modes qui affichent des grosses
-  flèches à l'écran c'est immonde". Un seul indicateur à repasser à `false`
-  pour tout réactiver (UI grisée, pas supprimée, dans `StartupWindow`/
-  `ControlPanelWindow`/`OnboardingWindow`).
+  flèches à l'écran c'est immonde". **Ce flag et le code des deux modes ont
+  depuis été supprimés entièrement — voir Version 22.**
   Correction de langue notée par l'utilisateur au passage (pas encore
   appliquée à l'ensemble du code, seulement à ce qui a été écrit depuis) :
   "combo" est masculin en français dans l'usage de la communauté Brawlhalla
@@ -1426,10 +1400,170 @@ pas de résolution de conflit plus fine pour l'instant.
   monde vient du même endroit plutôt que de mélanger deux origines) — plus
   aucun légend sans portrait, plus de fallback de masquage à gérer dans
   `MainWindow.UpdateLegendPortrait`.
+- Version 21 (refonte UI — accueil unifié + accès depuis l'overlay) : retour
+  utilisateur que l'app restait "excessivement peu facile à prendre en main"
+  malgré les Versions 11-17 — demande explicite de "refonte totale" vers un
+  écran d'accueil avec personnages sélectionnables par portrait. Plan détaillé
+  produit et validé avant tout code (voir artifact publié en session).
+  1. **Fusion `StartupWindow` + `OnboardingWindow` → `DashboardWindow`** : les
+     deux fenêtres faisaient déjà l'essentiel de ce qui était demandé (grille
+     de portraits, fourche premier lancement) mais vivaient séparément avec
+     un choix de fenêtre décidé dans `App.xaml.cs` — fusionnées en une seule
+     classe pilotée par un paramètre de constructeur (voir bullet
+     `DashboardWindow` dans l'Architecture ci-dessus pour le détail complet).
+     Fichiers `StartupWindow.xaml(.cs)`/`OnboardingWindow.xaml(.cs)` supprimés
+     après vérification qu'aucune référence fonctionnelle n'y pointait
+     ailleurs dans le code (seulement des commentaires, mis à jour au passage).
+  2. **Trou trouvé par l'utilisateur en testant** : une fois l'overlay lancé
+     en jeu, aucun moyen de revenir à cette Dashboard pour changer de
+     personnage/combo — `Ctrl+Alt+U`/clic tray/bouton ⚙ de la barre de
+     contrôle overlay n'ouvraient que l'ancien `ControlPanelWindow` (liste de
+     combos à plat dans un onglet, pas la grille de portraits). Corrigé en
+     rouvrant `DashboardWindow` (mode `inGameMode: true`) depuis ces trois
+     points d'entrée à la place de `ControlPanelWindow` — voir le détail du
+     bug évité (double overlay) et le comportement à deux modes dans le
+     bullet `DashboardWindow` ci-dessus. `ControlPanelWindow` reste
+     atteignable depuis le bouton « Réglages avancés » de la Dashboard, pour
+     les réglages fins (touches/apparence) qu'elle ne couvre pas.
+  3. **Barre de contrôle overlay** (`OverlayControlBarWindow`) : ajout d'un
+     badge de mode persistant (texte doré "Tutoriel"/"Historique"/"Grand
+     affichage" à côté des boutons quand la barre est dépliée) — jusque-là
+     seul un flash de 1.5s sur `MainWindow` indiquait le mode juste après un
+     changement, rien de permanent en cas de doute a posteriori.
+  4. **Réactivation des modes Historique/Grand affichage explicitement
+     refusée pour l'instant** : proposée comme étape suivante du plan, mais
+     l'utilisateur a rappelé qu'ils avaient été désactivés sur signalement
+     esthétique explicite (Version 17, "c'est immonde") — les remettre tels
+     quels aurait juste réintroduit le même problème. Reste sur la liste des
+     pistes non faites, à ne reprendre qu'après un retravail visuel dédié.
+  Vérifié à chaque étape par build (`dotnet build -c Release`, 0
+  avertissement/erreur imputable aux changements) et par test visuel réel :
+  capture d'écran de la grille de portraits (scroll fonctionnel), clic sur un
+  portrait via UI Automation (armes/combos mis à jour en direct, vérifié par
+  capture avant/après), lancement de l'overlay puis réouverture de la
+  Dashboard *depuis* l'overlay en cours (bouton ⚙), clic sur « ✓ Appliquer »
+  suivi d'une énumération des fenêtres du processus pour confirmer qu'un seul
+  `MainWindow` existe (pas de doublon).
+- Version 22 (audit d'amélioration + suppression définitive des modes
+  Historique/Grand affichage) : suite à la demande "analyse approfondie de
+  toutes les features, pistes d'amélioration triées par utilité", un audit
+  complet (`docs/amelioration.md`) a listé des pistes de Faible à Critique.
+  L'utilisateur a demandé de "patcher" en priorisant les critiques. Deux
+  points Critique traités :
+  1. **Dérive doc/code** (le point faible historique du projet, déjà payé
+     deux fois — combos hallucinées "Version 9", citation fabriquée
+     "Correctif Faux") : le docstring de `Combo.MatchMode` affirmait encore
+     "Only Strict is implemented for the MVP" alors que `IgnoreExtraneous`
+     est bien implémenté depuis le 2026-07-25 — corrigé. Champ mort
+     `_historySlotMode3` (jamais ajouté à l'arbre visuel) supprimé.
+  2. **Modes Historique/Grand affichage bloqués sans échéance** depuis la
+     Version 17 (`AppState.CombosOnlyMode = true`) : l'utilisateur a
+     explicitement choisi de les **supprimer entièrement** plutôt que de les
+     retravailler visuellement (voir option recommandée, choisie telle
+     quelle). Suppression complète du code des deux modes : `AppState.
+     ActiveMode`/`SetMode`/`CycleMode`/`ModeChanged`/`CombosOnlyMode`,
+     `OverlaySettings.Position`/`OverlayPosition`/`FreeLeft`/`FreeTop`/
+     `DefaultMode`/`FavoriteModes`, tout le code de construction/affichage
+     des modes 0/1 dans `MainWindow.xaml.cs` (`BuildMode1Panel`,
+     `BuildMovementCluster`, `BuildActionButtons`, `BuildKeycap`,
+     `BuildActionKeycapContent`, `BuildHistoryContainer`, `BuildMode2Layer`,
+     `BuildBigArrow`, `BuildBigKeycap`, `RegisterBrush`/
+     `RegisterColorSwapBrush`, `RepositionPanel`, les handlers de drag
+     `Mode1Panel_*`, l'historique visuel — `_historyPanel`,
+     `CreateHistoryEntry`, `BindsEqual`, `Pulse`, `ResetHistoryClearTimer`,
+     `ClearHistoryGraduallyAsync` — devenu sans objet puisqu'il n'était
+     affiché qu'en mode Historique), ainsi que les sélecteurs de mode dans
+     `ControlPanelWindow` (mode par défaut, modes favoris du cycle rapide,
+     position de l'overlay) et `DashboardWindow` (3 boutons radio de mode).
+     Le chord manette `Start + Y` et le raccourci `Ctrl+Alt+P` (changer de
+     mode) supprimés en conséquence — plus de sens avec un seul mode.
+     **Découverte en cours de route** : `ShowModeBadge` avait été supprimé
+     par erreur en pensant qu'il ne servait qu'au changement de mode, alors
+     que c'est un mécanisme de toast générique réutilisé pour de nombreux
+     feedbacks ponctuels (miroir détecté, révélation quiz, combo maîtrisé,
+     enregistrement) — restauré et renommé `ShowToast`/`_toastBadge` pour
+     refléter son vrai rôle générique. `RegisterMove` (log de session pour
+     l'export CSV + enregistrement de combo `Ctrl+Alt+R`) et
+     `QueuePendingBind`/`_pendingBinds`/`_comboTimer` (regroupement de
+     touches quasi-simultanées, alimente `ComboRunner`) sont restés intacts
+     : ils ne dépendaient pas de l'affichage de l'historique visuel, contrairement
+     à ce qu'un nettoyage trop rapide aurait pu supposer. Vérifié par build
+     (`dotnet build -c Release`, 0 avertissement/erreur) et par grep sur tout
+     le repo confirmant l'absence de référence résiduelle aux symboles
+     supprimés. **Pas testé en jeu** à ce stade (l'utilisateur a signalé un
+     problème d'écran pendant la session, l'app n'a donc pas été relancée par
+     prudence) — à tester manuellement avant de considérer ce chantier
+     entièrement clos.
+  Suite de la même session, demande explicite de "patcher en priorisant les
+  critiques" : les 3 autres pistes Élevé de `docs/amelioration.md` traitées
+  (la 4ᵉ, combos de légende, explicitement mise en pause — aucune source
+  fournie quand demandé) plus 4 pistes Moyen/Faible :
+  - **Détection de conflit de touche en temps réel** (`ControlPanelWindow`,
+    onglet Touches) : chaque champ Keys se borde en rouge dès qu'une touche
+    saisie est aussi utilisée par une autre action, recalculé à chaque
+    frappe (`RecomputeKeyConflicts`) — plus besoin d'attendre le clic sur
+    "Enregistrer" pour le découvrir. Purement visuel, la validation
+    bloquante existante à la sauvegarde reste inchangée.
+  - **Raccourcis clavier globaux rebindables** : les six raccourcis restés
+    en dur (`VK_O`/`VK_R`/`VK_U`/`VK_I`/`VK_H`/`VK_M`) sont devenus des
+    champs `OverlaySettings.LockVk`/`RecordVk`/`DashboardVk`/`RevealVk`/
+    `SuspendVk`/`HideVk`, sur le même modèle que `ComboNextVk`/`ComboPrevVk`
+    déjà reconfigurables. Onglet Général (réglages avancés) : six lignes
+    "Écouter" réutilisant la mécanique existante, avec détection de
+    conflit entre les 8 raccourcis (`AllShortcutVks`) avant d'accepter une
+    nouvelle touche. Bandeau de raccourcis in-overlay et onglet À propos
+    mis à jour pour afficher les touches réellement configurées plutôt que
+    des lettres en dur.
+  - **Parcours, Chapitre 4 "Ton premier vrai combo"** (2 leçons) : à la
+    différence des chapitres précédents, **aucune nouvelle donnée de jeu
+    sourcée** — reprend littéralement deux combos Blasters déjà vérifiés
+    dans `WeaponComboPresets.Table` (dLight>nLight puis dLight>sAir,
+    3+ Dex, seuil le plus bas du fichier), c'est la pièce qui relie
+    explicitement le Parcours au moteur `ComboRunner` que le reste de l'app
+    utilise déjà. Chapitre 5 (technique avancées) toujours pas fait.
+  - **Overlay invisible après inactivité** (`Settings.AutoHideEnabled`/
+    `AutoHideIdleSeconds`, désactivé par défaut) : le panneau du mode
+    Tutoriel s'estompe (opacité ~0.12, pas masqué comme
+    `AppState.OverlayHidden`) après N secondes sans input, poll
+    indépendant du clavier toutes les 500ms (`_autoHideCheckTimer`, même
+    principe que `CheckAbandon` côté `ComboRunner`) — redevient plein
+    dès le prochain appui.
+  - **Thèmes de couleur en un clic** (onglet Touches) : 4 palettes
+    prédéfinies (Défaut/Néon/Pastel/Doré) remplissent d'un coup les champs
+    Couleur de toutes les actions, par position dans `AppState.Binds` —
+    rien n'est sauvegardé tant que "Enregistrer les touches" n'est pas
+    cliqué, comme n'importe quel autre changement de ce formulaire.
+  - **Fichier de log de diagnostic** (`Config/DiagnosticLog.cs`,
+    `diagnostic.log` à côté de l'exe) : chaque exception non gérée
+    (`DispatcherUnhandledException` + `AppDomain.UnhandledException` pour
+    les threads hors UI, notamment les hooks) y est journalisée en plus de
+    la `MessageBox` existante — jusque-là rien ne survivait à la fermeture
+    de cette boîte de dialogue, impossible à diagnostiquer après coup pour
+    un bug non reproduit en direct. Écriture best-effort (jamais de
+    plantage à cause du log lui-même).
+  - **Import/export de profil complet** (`ControlPanelWindow`, onglet
+    Général) : touches du profil actif + tous les combos + une partie de
+    l'apparence (`ProfileBundle`, classe privée) en un seul fichier JSON —
+    jusque-là seul l'export/import combo par combo existait. Import
+    **remplace entièrement** les touches du profil actif et la liste de
+    combos (`AppState.ReplaceBinds`/`ReplaceCombos`, déjà existants) après
+    confirmation explicite de l'utilisateur (nombre de touches/combos
+    affiché dans la boîte de dialogue).
+  Trois pistes Moyen non traitées faute de scope raisonnable en une passe
+  (détection de tech skip et comparaison de sessions : conception nouvelle
+  nécessaire ; mode hors-jeu assumé : décision de design à clarifier
+  d'abord), une piste Faible volontairement laissée de côté (métronome —
+  risque déjà identifié de réintroduire le timing comme condition d'échec).
+  Vérifié par `dotnet build -c Release` (0 avertissement/erreur) après
+  chaque changement — **pas testé en jeu** à ce stade (voir la note sur le
+  problème d'écran survenu pendant cette session, plus haut) : à tester
+  manuellement avant de considérer ce chantier entièrement clos. Détail
+  complet et statut à jour de chaque piste dans `docs/amelioration.md`.
 
 ## Pistes évoquées mais pas demandées/faites
-- Réactiver les modes Historique et Grand affichage (`AppState.CombosOnlyMode`)
-  une fois leur rendu retravaillé — désactivés temporairement en Version 17.
+- ~~Réactiver les modes Historique et Grand affichage~~ — tranché en
+  Version 22 : l'utilisateur a choisi de les supprimer définitivement plutôt
+  que de les retravailler visuellement. Ne plus proposer cette piste.
 - Le "Parcours" pédagogique (`docs/plan_ux_onboarding.md` §4) : Chapitre 0
   (prise en main de l'app), Chapitre 1 "Survivre" (Version 14), Chapitre 2
   "Frapper" (Version 15) et Chapitre 3 "Bouger" (Version 16) faits — voir

@@ -8,7 +8,7 @@ namespace BrawlhallaOverlay;
 /// combos : un groupe où chaque combo (sauf le premier) est une extension stricte
 /// d'une autre — mêmes premières étapes, dans le même ordre, plus au moins une étape
 /// en plus à la fin. Sert uniquement à l'affichage groupé/indenté dans les listes de
-/// combos (ControlPanelWindow, StartupWindow) — voir docs/combo_families_plan.md.
+/// combos (ControlPanelWindow, DashboardWindow) — voir docs/combo_families_plan.md.
 /// Ne touche ni ComboRunner ni ChainCombos : chaque combo reste une séquence
 /// autonome, une famille n'est qu'un regroupement de présentation.
 /// </summary>
@@ -137,7 +137,7 @@ public static class ComboFamilies
     /// triés par niveau croissant — au lieu de leur ordre d'origine dans `combos.json`, qui
     /// peut les avoir dispersés. Les combos sans famille gardent leur position d'origine.
     /// `resolve` traduit un index (absolu dans AppState.Combos, ou autre selon l'appelant)
-    /// en Combo — factorisé ici pour que ControlPanelWindow et StartupWindow affichent la
+    /// en Combo — factorisé ici pour que ControlPanelWindow et DashboardWindow affichent la
     /// même logique de regroupement sans la dupliquer.</summary>
     public static List<OrderedCombo> OrderWithFamilies(IReadOnlyList<int> indices, System.Func<int, Combo> resolve)
     {

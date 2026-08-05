@@ -116,7 +116,13 @@ public partial class ComboEditorWindow : Window
 
         var toleranceRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         toleranceRow.Children.Add(FieldLabel("Tolérance par défaut (ms)", inline: true));
-        _toleranceBox = new TextBox { Text = (_existing?.DefaultToleranceMs ?? 400).ToString(), Width = 70, Margin = new Thickness(6, 0, 20, 0) };
+        _toleranceBox = new TextBox
+        {
+            Text = (_existing?.DefaultToleranceMs ?? 400).ToString(),
+            Width = 70,
+            Margin = new Thickness(6, 0, 20, 0),
+            ToolTip = "Purement indicatif : n'affecte plus la réussite/l'échec du combo (seule une mauvaise touche fait échouer), sert uniquement à régler la vitesse de la barre de tolérance visuelle affichée en jeu.",
+        };
         toleranceRow.Children.Add(_toleranceBox);
         toleranceRow.Children.Add(FieldLabel("Mode", inline: true));
         _matchModeCombo = new ComboBox
@@ -146,12 +152,26 @@ public partial class ComboEditorWindow : Window
 
         root.Children.Add(new TextBlock
         {
-            Text = "Clique « Écouter » sur une étape puis appuie sur une touche/bouton : ça ajoute une puce. Reclique sur la même étape pour ajouter une touche pressée en même temps (ex. Droite + Att. légère). « + Ajouter une étape » démarre la suivante.",
+            Text = "Clique « Écouter » sur une étape puis appuie sur une touche/bouton : ça ajoute une puce. Reclique sur la même étape pour ajouter une touche pressée en même temps (ex. Droite + Att. légère). « + Ajouter une étape » démarre la suivante. Les champs Max/Min (ms) sont purement indicatifs : ils règlent la vitesse de la barre de tolérance visuelle affichée en jeu, mais n'affectent plus la réussite/l'échec du combo (seule une mauvaise touche fait échouer une étape).",
             Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
         });
+
+        var stepsHeader = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+        stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+        stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+        stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
+        stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        var maxHeader = new TextBlock { Text = "Max (indicatif)", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), TextWrapping = TextWrapping.Wrap };
+        Grid.SetColumn(maxHeader, 1);
+        stepsHeader.Children.Add(maxHeader);
+        var minHeader = new TextBlock { Text = "Min (indicatif)", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), TextWrapping = TextWrapping.Wrap };
+        Grid.SetColumn(minHeader, 2);
+        stepsHeader.Children.Add(minHeader);
+        root.Children.Add(stepsHeader);
 
         var scroller = new ScrollViewer { Content = _stepsPanel, MaxHeight = 240, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         root.Children.Add(scroller);
@@ -259,11 +279,11 @@ public partial class ComboEditorWindow : Window
 
         RefreshChips();
 
-        var maxBox = new TextBox { Text = step?.MaxDelayMs?.ToString() ?? "", Margin = new Thickness(2), Tag = "max", ToolTip = "Délai max (ms)" };
+        var maxBox = new TextBox { Text = step?.MaxDelayMs?.ToString() ?? "", Margin = new Thickness(2), Tag = "max", ToolTip = "Délai max (ms) — purement indicatif, pilote seulement la barre de tolérance visuelle, n'affecte pas la réussite/l'échec du combo." };
         Grid.SetColumn(maxBox, 1);
         row.Children.Add(maxBox);
 
-        var minBox = new TextBox { Text = step?.MinDelayMs?.ToString() ?? "", Margin = new Thickness(2), Tag = "min", ToolTip = "Délai min (ms)" };
+        var minBox = new TextBox { Text = step?.MinDelayMs?.ToString() ?? "", Margin = new Thickness(2), Tag = "min", ToolTip = "Délai min (ms) — purement indicatif, pilote seulement la barre de tolérance visuelle, n'affecte pas la réussite/l'échec du combo." };
         Grid.SetColumn(minBox, 2);
         row.Children.Add(minBox);
 

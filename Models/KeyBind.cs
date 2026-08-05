@@ -19,10 +19,6 @@ public sealed class KeyBind
     public List<string> GamepadButtons { get; set; } = new();
 
     public string Label { get; set; } = "";
-    public string Color { get; set; } = "#FFFFFF";
-
-    /// <summary>Symbol shown in the history log next to the move name, e.g. "◄" or "⚡".</summary>
-    public string Symbol { get; set; } = "";
 
     /// <summary>"Movement" (placed in the ZQSD keycap cluster) or "Action" (placed as a big button).</summary>
     public string Group { get; set; } = "Action";

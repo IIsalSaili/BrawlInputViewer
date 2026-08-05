@@ -10,7 +10,7 @@ namespace BrawlhallaOverlay;
 /// <summary>
 /// Petite barre de pilotage attachée à l'overlay (§5.3.1 du plan UX onboarding), pour ne plus
 /// dépendre uniquement des raccourcis clavier Ctrl+Alt+* pour les actions les plus fréquentes en
-/// jeu (changer de mode/combo, suspendre la capture, ouvrir le panneau). Contrairement à
+/// jeu (suspendre la capture, ouvrir l'accueil). Contrairement à
 /// MainWindow, cette fenêtre n'est PAS click-through : c'est un choix délibéré, c'est justement
 /// le seul endroit de l'overlay où la souris doit pouvoir agir. Elle vit en bas à droite de
 /// l'écran ciblé, une zone volontairement éloignée du HUD par défaut (bas-gauche) pour ne jamais
@@ -23,7 +23,7 @@ namespace BrawlhallaOverlay;
 /// </summary>
 public partial class OverlayControlBarWindow : Window
 {
-    private const double WindowWidth = 230;
+    private const double WindowWidth = 220;
     private const double WindowHeight = 40;
     private static readonly TimeSpan CollapseDelay = TimeSpan.FromMilliseconds(500);
 
@@ -48,7 +48,10 @@ public partial class OverlayControlBarWindow : Window
         Build();
 
         AppState.CaptureSuspendedChanged += OnCaptureSuspendedChanged;
-        Closed += (_, _) => AppState.CaptureSuspendedChanged -= OnCaptureSuspendedChanged;
+        Closed += (_, _) =>
+        {
+            AppState.CaptureSuspendedChanged -= OnCaptureSuspendedChanged;
+        };
     }
 
     /// <summary>Positionne la barre en bas à droite de la zone de travail donnée (voir
@@ -109,12 +112,12 @@ public partial class OverlayControlBarWindow : Window
         };
         root.Children.Add(_expandedBorder);
 
-        _expandedBar.Children.Add(BarButton("⟳", "Changer de mode d'affichage\nCtrl+Alt+P · manette : Start + Y", () => AppState.CycleMode()));
-        _expandedBar.Children.Add(BarButton("◀", "Combo précédente\nManette : Start + LB", () => AppState.CyclePreviousCombo()));
-        _expandedBar.Children.Add(BarButton("▶", "Combo suivante\nCtrl+Alt+K · manette : Start + RB", () => AppState.CycleCombo()));
+        // Boutons combo précédente/suivante déplacés dans le panneau de combo lui-même
+        // (MainWindow.BuildComboNameRow, mode Tutoriel) — plus logique juste à côté du nom du
+        // combo qu'ils affectent que dans cette barre séparée.
         _pauseGlyph = new TextBlock();
         _expandedBar.Children.Add(BarButton(_pauseGlyph, "Suspendre/reprendre la capture\nCtrl+Alt+H · manette : Start + Back", () => AppState.ToggleCaptureSuspended()));
-        _expandedBar.Children.Add(BarButton("⚙", "Ouvrir le panneau de contrôle\nCtrl+Alt+U · manette : Start + X", () => _openPanel()));
+        _expandedBar.Children.Add(BarButton("⚙", "Ouvrir l'accueil (perso/combo/mode)\nCtrl+Alt+U · manette : Start + X", () => _openPanel()));
         UpdatePauseGlyph();
 
         RootGrid.Children.Add(root);

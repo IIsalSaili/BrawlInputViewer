@@ -18,7 +18,7 @@ namespace BrawlhallaOverlay;
 /// </summary>
 public partial class ControlPanelWindow : Window
 {
-    private static readonly string[] TabNames = { "Général", "Touches", "Combos", "Apparence", "À propos" };
+    private static readonly string[] TabNames = { "Général", "Touches", "Périphériques", "Combos", "Apparence", "À propos" };
     // Fond bleu-nuit/violet sombre (au lieu du gris neutre d'origine) + accent doré
     // repris de la tray icon (#E8C44A) : signature de marque cohérente avec l'overlay
     // et le motif "écusson" de l'UI Brawlhalla — voir Brawhl.md section 4/7.
@@ -100,9 +100,10 @@ public partial class ControlPanelWindow : Window
         {
             0 => BuildGeneralTab(),
             1 => BuildKeybindsTab(),
-            2 => BuildCombosTab(),
-            3 => BuildAppearanceTab(),
-            4 => BuildAboutTab(),
+            2 => BuildDevicesTab(),
+            3 => BuildCombosTab(),
+            4 => BuildAppearanceTab(),
+            5 => BuildAboutTab(),
             _ => null,
         };
     }
@@ -196,15 +197,6 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(lockBtn);
         panel.Children.Add(HelpText("Raccourci rapide en jeu : Ctrl+Alt+O."));
 
-        var resetPosBtn = new Button { Content = "Réinitialiser la position (bas-gauche)", Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) };
-        resetPosBtn.Click += (_, _) =>
-        {
-            AppState.Settings.Position = OverlayPosition.BottomLeft;
-            AppState.SaveSettings();
-        };
-        panel.Children.Add(resetPosBtn);
-        panel.Children.Add(HelpText("Utile après avoir glissé l'overlay ailleurs à l'écran."));
-
         var suspendBtn = new Button { Content = SuspendLabel(), Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) };
         suspendBtn.Click += (_, _) => AppState.ToggleCaptureSuspended();
         void SuspendHandler(bool _) => Dispatcher.Invoke(() => suspendBtn.Content = SuspendLabel());
@@ -230,51 +222,89 @@ public partial class ControlPanelWindow : Window
         startupCheck.Unchecked += (_, _) => { StartupConfig.SetEnabled(false); AppState.Settings.LaunchAtStartup = false; AppState.SaveSettings(); };
         advancedPanel.Children.Add(startupCheck);
 
-        panel.Children.Add(new TextBlock { Text = "Mode actif au démarrage", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
-        var modeCombo = new ComboBox
-        {
-            Width = 220,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            ItemsSource = new[] { "Historique", "Grand affichage", "Tutoriel" },
-            SelectedIndex = AppState.CombosOnlyMode ? 2 : AppState.Settings.DefaultMode,
-            IsEnabled = !AppState.CombosOnlyMode,
-        };
-        modeCombo.SelectionChanged += (_, _) =>
-        {
-            AppState.Settings.DefaultMode = modeCombo.SelectedIndex;
-            AppState.SaveSettings();
-        };
-        panel.Children.Add(modeCombo);
-        if (AppState.CombosOnlyMode) panel.Children.Add(HelpText("Historique et Grand affichage sont temporairement désactivés — voir AppState.CombosOnlyMode."));
+        // Import/export de profil complet (docs/amelioration.md piste #11) : touches du profil
+        // actif + combos + apparence en un seul fichier, pour changer de PC d'un coup plutôt que
+        // de recréer profils et combos séparément (seul l'export/import combo par combo existait
+        // jusque-là — ExportSelectedCombo/ImportCombo ci-dessous, gardés inchangés).
+        advancedPanel.Children.Add(new TextBlock { Text = "Profil complet (touches + combos + apparence)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
+        var bundleRow = new StackPanel { Orientation = Orientation.Horizontal };
+        var bundleExportBtn = new Button { Content = "Exporter tout", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 8, 0) };
+        bundleExportBtn.Click += (_, _) => ExportProfileBundle();
+        bundleRow.Children.Add(bundleExportBtn);
+        var bundleImportBtn = new Button { Content = "Importer tout", Padding = new Thickness(10, 4, 10, 4) };
+        bundleImportBtn.Click += (_, _) => ImportProfileBundle();
+        bundleRow.Children.Add(bundleImportBtn);
+        advancedPanel.Children.Add(bundleRow);
+        advancedPanel.Children.Add(HelpText("Exporte les touches du profil actif, tous les combos et l'apparence en un seul fichier JSON. Importer REMPLACE entièrement les touches du profil actif et la liste de combos actuelle — demande confirmation avant d'écraser quoi que ce soit."));
 
-        advancedPanel.Children.Add(new TextBlock { Text = "Modes inclus dans le cycle rapide (Ctrl+Alt+P)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
-        var favPanel = new StackPanel { Orientation = Orientation.Horizontal };
-        string[] modeNames = { "Historique", "Grand affichage", "Tutoriel" };
-        for (int i = 0; i < modeNames.Length; i++)
+        // Raccourcis combo suivante/précédente reconfigurables (demande explicite : le bouton
+        // précédent était figé sur Ctrl+Alt+K sans équivalent clavier pour "précédente", qui
+        // n'existait qu'à la manette). Seule la touche finale change ; le préfixe Ctrl+Alt reste
+        // fixe comme tous les autres raccourcis pour éviter toute collision avec le jeu.
+        advancedPanel.Children.Add(new TextBlock { Text = "Raccourcis clavier globaux (Ctrl+Alt+*)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
+        advancedPanel.Children.Add(HelpText("Reconfigurables un par un pour éviter une collision avec un autre logiciel (OBS, Discord, un launcher...) sans devoir recompiler. Le préfixe Ctrl+Alt reste fixe. Clique directement sur la touche affichée pour la réassigner."));
+
+        // Toutes les touches finales actuellement utilisées par un raccourci global, pour détecter
+        // un conflit dès l'écoute plutôt qu'après coup (voir docs/amelioration.md piste #13).
+        int[] AllShortcutVks() => new[]
         {
-            int mode = i;
-            var cb = new CheckBox
+            AppState.Settings.LockVk,
+            AppState.Settings.ComboNextVk,
+            AppState.Settings.ComboPrevVk,
+            AppState.Settings.RecordVk,
+            AppState.Settings.DashboardVk,
+            AppState.Settings.RevealVk,
+            AppState.Settings.SuspendVk,
+            AppState.Settings.HideVk,
+        };
+
+        UIElement ShortcutRow(string label, Func<int> getVk, Action<int> setVk)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+            row.Children.Add(Label(label));
+            var keyBtn = new Button
             {
-                Content = modeNames[i],
+                Content = $"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(getVk())}",
                 Foreground = TextColor,
-                IsChecked = AppState.CombosOnlyMode ? mode == 2 : AppState.Settings.FavoriteModes.Contains(mode),
-                IsEnabled = !AppState.CombosOnlyMode,
-                Margin = new Thickness(0, 0, 16, 0),
+                Background = CardBg,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x40, 0x55)),
+                BorderThickness = new Thickness(1),
+                Width = 130,
+                Padding = new Thickness(0, 5, 0, 5),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = "Clique puis appuie sur la touche voulue.",
             };
-            cb.Checked += (_, _) =>
+            keyBtn.Click += (_, _) =>
             {
-                if (!AppState.Settings.FavoriteModes.Contains(mode)) AppState.Settings.FavoriteModes.Add(mode);
-                AppState.SaveSettings();
+                var original = keyBtn.Content;
+                keyBtn.Content = "…";
+                ListenForNextKey(vk =>
+                {
+                    var current = getVk();
+                    if (AllShortcutVks().Any(v => v != current && v == vk))
+                    {
+                        MessageBox.Show($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk)} est déjà utilisé par un autre raccourci.", "Touche déjà utilisée", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        keyBtn.Content = original;
+                        return;
+                    }
+                    setVk(vk);
+                    AppState.SaveSettings();
+                    keyBtn.Content = $"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk)}";
+                });
             };
-            cb.Unchecked += (_, _) =>
-            {
-                if (AppState.Settings.FavoriteModes.Count <= 1) { cb.IsChecked = true; return; } // au moins un mode actif
-                AppState.Settings.FavoriteModes.Remove(mode);
-                AppState.SaveSettings();
-            };
-            favPanel.Children.Add(cb);
+            row.Children.Add(keyBtn);
+            return row;
         }
-        advancedPanel.Children.Add(favPanel);
+
+        advancedPanel.Children.Add(ShortcutRow("Verrouiller/déverrouiller", () => AppState.Settings.LockVk, vk => AppState.Settings.LockVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Combo suivante", () => AppState.Settings.ComboNextVk, vk => AppState.Settings.ComboNextVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Combo précédente", () => AppState.Settings.ComboPrevVk, vk => AppState.Settings.ComboPrevVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Enregistrer un combo", () => AppState.Settings.RecordVk, vk => AppState.Settings.RecordVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Ouvrir l'accueil", () => AppState.Settings.DashboardVk, vk => AppState.Settings.DashboardVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Révéler le combo", () => AppState.Settings.RevealVk, vk => AppState.Settings.RevealVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Suspendre la capture", () => AppState.Settings.SuspendVk, vk => AppState.Settings.SuspendVk = vk));
+        advancedPanel.Children.Add(ShortcutRow("Masquer l'overlay", () => AppState.Settings.HideVk, vk => AppState.Settings.HideVk = vk));
+        advancedPanel.Children.Add(HelpText("Clique « Écouter » puis appuie sur la touche voulue (utilisée avec Ctrl+Alt, comme les autres raccourcis). Les boutons ◀/▶ du panneau de combo (mode Tutoriel) et le menu du tray affichent toujours la touche réellement configurée."));
 
         var keepStreakCheck = new CheckBox
         {
@@ -327,6 +357,36 @@ public partial class ControlPanelWindow : Window
         thresholdRow.Children.Add(thresholdBox);
         advancedPanel.Children.Add(thresholdRow);
         advancedPanel.Children.Add(HelpText("Session guidée : un combo n'est marqué « maîtrisé » et n'enchaîne vers le suivant qu'après ce nombre de réussites d'affilée (par défaut 1 = enchaîne dès la 1ère réussite)."));
+
+        var autoHideCheck = new CheckBox
+        {
+            Content = "Estomper le panneau après une période d'inactivité",
+            Foreground = TextColor,
+            IsChecked = AppState.Settings.AutoHideEnabled,
+            Margin = new Thickness(0, 16, 0, 4),
+        };
+        autoHideCheck.Checked += (_, _) => { AppState.Settings.AutoHideEnabled = true; AppState.SaveSettings(); };
+        autoHideCheck.Unchecked += (_, _) => { AppState.Settings.AutoHideEnabled = false; AppState.SaveSettings(); };
+        advancedPanel.Children.Add(autoHideCheck);
+
+        var autoHideRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(18, 0, 0, 4) };
+        autoHideRow.Children.Add(Label("Secondes d'inactivité avant estompage"));
+        var autoHideBox = new TextBox { Text = AppState.Settings.AutoHideIdleSeconds.ToString(), Width = 40 };
+        autoHideBox.LostFocus += (_, _) =>
+        {
+            if (int.TryParse(autoHideBox.Text, out var value) && value >= 1)
+            {
+                AppState.Settings.AutoHideIdleSeconds = value;
+                AppState.SaveSettings();
+            }
+            else
+            {
+                autoHideBox.Text = AppState.Settings.AutoHideIdleSeconds.ToString();
+            }
+        };
+        autoHideRow.Children.Add(autoHideBox);
+        advancedPanel.Children.Add(autoHideRow);
+        advancedPanel.Children.Add(HelpText("Le panneau redevient pleinement visible dès le prochain appui — utile pour ne pas polluer l'écran pendant les phases sans combat."));
 
         var quizCheck = new CheckBox
         {
@@ -430,22 +490,86 @@ public partial class ControlPanelWindow : Window
     {
         var panel = new StackPanel();
         panel.Children.Add(SectionTitle("Touches"));
-        panel.Children.Add(HelpText("Modifie le nom, les touches (séparées par des « + »), le symbole et la couleur (hex) de chaque action. Clique « Écouter » puis appuie sur une touche pour la réassigner en un clic. Colonne 🎮 : boutons manette facultatifs (en plus des touches, pas à la place) — clique 🎮 puis appuie sur un bouton de la manette pour l'assigner."));
+        panel.Children.Add(HelpText("Modifie le nom de chaque action. Le bouton Touches affiche la/les touche(s) actuelles — clique dessus puis appuie sur ce que tu veux assigner (tiens plusieurs touches ensemble pour un combo, ex. Shift+Bas), exactement comme dans n'importe quel jeu. Il se borde en rouge dès qu'une touche qu'il contient est aussi utilisée par une autre action — pas besoin d'attendre l'enregistrement pour le voir. Bouton 🎮 : bouton manette facultatif (en plus des touches, pas à la place), le ✕ à côté le retire."));
 
-        var rows = new List<(KeyBind Bind, TextBox Label, TextBox Keys, TextBox Gamepad, TextBox Symbol, TextBox Color)>();
+        var rows = new List<(KeyBind Bind, TextBox Label, Button Keys, Button Gamepad)>();
 
-        var grid = new Grid();
+        const string KeysTooltipBase = "Clique puis appuie sur la/les touche(s) voulues (tiens-les ensemble pour un combo, ex. Shift+Bas).";
+        const string GamepadTooltipBase = "Bouton manette (facultatif) — clique puis appuie sur un bouton de la manette pour l'assigner.";
+
+        // Détection de conflit de touche en temps réel (à chaque capture, pas seulement à la
+        // sauvegarde) : recalculée après chaque réassignation, plutôt que devoir enregistrer
+        // pour découvrir un conflit. Purement visuel (bordure rouge) — la validation bloquante
+        // reste dans saveBtn.
+        void RecomputeKeyConflicts()
+        {
+            var buttonsByKey = new Dictionary<string, List<Button>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (_, _, keysBtn, _) in rows)
+            {
+                foreach (var keyName in (List<string>)keysBtn.Tag)
+                {
+                    if (!buttonsByKey.TryGetValue(keyName, out var list))
+                    {
+                        list = new List<Button>();
+                        buttonsByKey[keyName] = list;
+                    }
+                    list.Add(keysBtn);
+                }
+            }
+
+            var conflicted = new HashSet<Button>();
+            foreach (var buttons in buttonsByKey.Values)
+            {
+                if (buttons.Count > 1) foreach (var b in buttons) conflicted.Add(b);
+            }
+
+            foreach (var (_, _, keysBtn, _) in rows)
+            {
+                if (conflicted.Contains(keysBtn))
+                {
+                    keysBtn.BorderBrush = new SolidColorBrush(Color.FromRgb(0xE7, 0x4C, 0x3C));
+                    keysBtn.BorderThickness = new Thickness(2);
+                    keysBtn.ToolTip = "Cette touche est aussi utilisée par une autre action — un seul bouton gagnera à l'enregistrement.";
+                }
+                else
+                {
+                    keysBtn.ClearValue(BorderBrushProperty);
+                    keysBtn.ClearValue(BorderThicknessProperty);
+                    keysBtn.ToolTip = KeysTooltipBase;
+                }
+            }
+        }
+
+        // Bouton "keycap" standard (fond distinct, coins arrondis, curseur main) réutilisé pour
+        // Touches et Manette — retour utilisateur explicite : un champ en lecture seule qui
+        // ressemble à un TextBox ne se lit pas comme cliquable, un vrai bouton si.
+        Button KeycapButton(string content, object? tag, string tooltip)
+        {
+            var btn = new Button
+            {
+                Content = content,
+                Tag = tag,
+                Padding = new Thickness(10, 5, 10, 5),
+                Margin = new Thickness(2),
+                MinWidth = 90,
+                Background = CardBg,
+                Foreground = TextColor,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x40, 0x55)),
+                BorderThickness = new Thickness(1),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = tooltip,
+            };
+            return btn;
+        }
+
         foreach (var bind in AppState.Binds)
         {
             var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(50) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(50) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
 
             var actionText = new TextBlock { Text = bind.Action, Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(actionText, 0);
@@ -455,50 +579,56 @@ public partial class ControlPanelWindow : Window
             Grid.SetColumn(labelBox, 1);
             row.Children.Add(labelBox);
 
-            var keysBox = new TextBox { Text = string.Join(" + ", bind.Keys), Margin = new Thickness(2) };
-            Grid.SetColumn(keysBox, 2);
-            row.Children.Add(keysBox);
-
-            var listenBtn = new Button { Content = "Écouter", Margin = new Thickness(2) };
-            Grid.SetColumn(listenBtn, 3);
-            listenBtn.Click += (_, _) =>
+            // Bouton = touche(s) actuelle(s), cliquer dessus écoute immédiatement le prochain
+            // appui (ou plusieurs touches tenues ensemble, capturées jusqu'au relâchement).
+            var keysBtn = KeycapButton(string.Join(" + ", bind.Keys), new List<string>(bind.Keys), KeysTooltipBase);
+            Grid.SetColumn(keysBtn, 2);
+            keysBtn.Click += (_, _) =>
             {
-                listenBtn.Content = "…";
-                ListenForNextKey(vk =>
+                keysBtn.Content = "…";
+                ListenForNextKeyChord(names =>
                 {
-                    var key = System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk);
-                    keysBox.Text = key.ToString();
-                    listenBtn.Content = "Écouter";
+                    keysBtn.Tag = names;
+                    keysBtn.Content = string.Join(" + ", names);
+                    RecomputeKeyConflicts();
                 });
             };
-            row.Children.Add(listenBtn);
+            row.Children.Add(keysBtn);
 
-            var gamepadBox = new TextBox { Text = string.Join(" + ", bind.GamepadButtons), Margin = new Thickness(2), ToolTip = "Boutons manette (facultatif), ex: A, DPadUp" };
-            Grid.SetColumn(gamepadBox, 4);
-            row.Children.Add(gamepadBox);
-
-            var listenGamepadBtn = new Button { Content = "🎮", Margin = new Thickness(2), ToolTip = "Écouter le prochain bouton manette pressé" };
-            Grid.SetColumn(listenGamepadBtn, 5);
-            listenGamepadBtn.Click += (_, _) =>
+            var gamepadName = bind.GamepadButtons.Count > 0 ? bind.GamepadButtons[0] : null;
+            var gamepadBtn = KeycapButton(gamepadName ?? "🎮 —", gamepadName, GamepadTooltipBase);
+            Grid.SetColumn(gamepadBtn, 3);
+            gamepadBtn.Click += (_, _) =>
             {
-                listenGamepadBtn.Content = "…";
+                gamepadBtn.Content = "…";
                 ListenForNextGamepadButton(name =>
                 {
-                    gamepadBox.Text = name;
-                    listenGamepadBtn.Content = "🎮";
+                    gamepadBtn.Tag = name;
+                    gamepadBtn.Content = name;
                 });
             };
-            row.Children.Add(listenGamepadBtn);
+            row.Children.Add(gamepadBtn);
 
-            var symbolBox = new TextBox { Text = bind.Symbol, Margin = new Thickness(2) };
-            Grid.SetColumn(symbolBox, 6);
-            row.Children.Add(symbolBox);
+            var clearGamepadBtn = new Button
+            {
+                Content = "✕",
+                Padding = new Thickness(0),
+                Margin = new Thickness(2),
+                Background = Brushes.Transparent,
+                Foreground = SubtleText,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = "Retirer le bouton manette assigné.",
+            };
+            Grid.SetColumn(clearGamepadBtn, 4);
+            clearGamepadBtn.Click += (_, _) =>
+            {
+                gamepadBtn.Tag = null;
+                gamepadBtn.Content = "🎮 —";
+            };
+            row.Children.Add(clearGamepadBtn);
 
-            var colorBox = new TextBox { Text = bind.Color, Margin = new Thickness(2) };
-            Grid.SetColumn(colorBox, 7);
-            row.Children.Add(colorBox);
-
-            rows.Add((bind, labelBox, keysBox, gamepadBox, symbolBox, colorBox));
+            rows.Add((bind, labelBox, keysBtn, gamepadBtn));
 
             var wrapper = new StackPanel();
             wrapper.Children.Add(row);
@@ -516,9 +646,12 @@ public partial class ControlPanelWindow : Window
             var seenKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var seenGamepadButtons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var (bind, _, keysBox, gamepadBox, _, _) in rows)
+            foreach (var (bind, _, keysBtn, gamepadBtn) in rows)
             {
-                var keys = keysBox.Text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+                // Les touches viennent toujours d'une capture réelle (KeyInterop), jamais d'une
+                // saisie texte libre depuis le passage aux boutons keycap — plus besoin de
+                // valider le nom, seul le doublon entre actions reste à vérifier.
+                var keys = (List<string>)keysBtn.Tag;
 
                 if (keys.Count == 0)
                 {
@@ -528,12 +661,6 @@ public partial class ControlPanelWindow : Window
 
                 foreach (var keyName in keys)
                 {
-                    if (!KeyBindConfig.TryResolveVirtualKeyCode(keyName, out _))
-                    {
-                        MessageBox.Show($"« {keyName} » (action « {bind.Action} ») n'est pas un nom de touche valide.", "Touches invalides", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
-                    }
-
                     if (seenKeys.TryGetValue(keyName, out var otherAction) && otherAction != bind.Action)
                     {
                         MessageBox.Show($"La touche « {keyName} » est déjà utilisée par « {otherAction} ». Une même touche ne peut déclencher qu'une seule action.", "Touche en double", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -543,34 +670,26 @@ public partial class ControlPanelWindow : Window
                 }
                 parsedKeys.Add(keys);
 
-                var gamepadButtons = gamepadBox.Text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
-                foreach (var buttonName in gamepadButtons)
+                var gamepadName = gamepadBtn.Tag as string;
+                var gamepadButtons = gamepadName is null ? new List<string>() : new List<string> { gamepadName };
+                if (gamepadName is not null)
                 {
-                    if (!GamepadHook.TryResolveSyntheticCode(buttonName, out _))
+                    if (seenGamepadButtons.TryGetValue(gamepadName, out var otherAction) && otherAction != bind.Action)
                     {
-                        var validNames = string.Join(", ", GamepadHook.Buttons.Select(b => b.Name));
-                        MessageBox.Show($"« {buttonName} » (action « {bind.Action} ») n'est pas un bouton manette valide.\nBoutons valides : {validNames}", "Bouton manette invalide", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        MessageBox.Show($"Le bouton « {gamepadName} » est déjà utilisé par « {otherAction} ».", "Bouton manette en double", MessageBoxButton.OK, MessageBoxImage.Warning);
                         return;
                     }
-
-                    if (seenGamepadButtons.TryGetValue(buttonName, out var otherAction) && otherAction != bind.Action)
-                    {
-                        MessageBox.Show($"Le bouton « {buttonName} » est déjà utilisé par « {otherAction} ».", "Bouton manette en double", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
-                    }
-                    seenGamepadButtons[buttonName] = bind.Action;
+                    seenGamepadButtons[gamepadName] = bind.Action;
                 }
                 parsedGamepad.Add(gamepadButtons);
             }
 
             for (int i = 0; i < rows.Count; i++)
             {
-                var (bind, labelBox, _, _, symbolBox, colorBox) = rows[i];
+                var (bind, labelBox, _, _) = rows[i];
                 bind.Label = labelBox.Text.Trim();
                 bind.Keys = parsedKeys[i];
                 bind.GamepadButtons = parsedGamepad[i];
-                bind.Symbol = symbolBox.Text.Trim();
-                bind.Color = colorBox.Text.Trim();
             }
             AppState.NotifyBindsMutated();
             saveBtn.Content = "Enregistré ✓";
@@ -590,6 +709,31 @@ public partial class ControlPanelWindow : Window
         AppState.Hook.KeyDown += Handler;
     }
 
+    // Capture toutes les touches tenues ensemble (chord) jusqu'au premier relâchement, pour
+    // pouvoir réassigner en un seul geste un combo comme Shift+Bas (Esquive) plutôt que de
+    // ne capturer qu'une touche à la fois.
+    private void ListenForNextKeyChord(Action<List<string>> onCaptured)
+    {
+        var pressed = new List<int>();
+
+        void KeyDownHandler(int vk)
+        {
+            if (!pressed.Contains(vk)) pressed.Add(vk);
+        }
+
+        void KeyUpHandler(int vk)
+        {
+            AppState.Hook.KeyDown -= KeyDownHandler;
+            AppState.Hook.KeyUp -= KeyUpHandler;
+            if (pressed.Count == 0) pressed.Add(vk);
+            var names = pressed.Select(v => System.Windows.Input.KeyInterop.KeyFromVirtualKey(v).ToString()).ToList();
+            Dispatcher.Invoke(() => onCaptured(names));
+        }
+
+        AppState.Hook.KeyDown += KeyDownHandler;
+        AppState.Hook.KeyUp += KeyUpHandler;
+    }
+
     private void ListenForNextGamepadButton(Action<string> onCaptured)
     {
         void Handler(int syntheticCode)
@@ -599,6 +743,122 @@ public partial class ControlPanelWindow : Window
             if (name is not null) Dispatcher.Invoke(() => onCaptured(name));
         }
         AppState.Gamepad.ButtonDown += Handler;
+    }
+
+    // ================= Périphériques =================
+
+    // Panneau de diagnostic façon "test des périphériques" de Discord (demande explicite de
+    // l'utilisateur après un signalement "la manette n'est pas détectée, aucun input ne se
+    // reflète en haut") : montre l'état brut lu par GamepadHook (connecté/pas, quel index
+    // XInput, quels boutons sont tenus en ce moment, sticks/gâchettes) indépendamment de tout
+    // binding — sert à distinguer "la manette n'est pas vue par XInput du tout" (ex. une
+    // manette PS4/PS5 branchée sans pilote XInput, qui ne parlera jamais XInput) de "elle est
+    // vue mais aucune action ne lui est assignée dans l'onglet Touches". Live, se met à jour
+    // tant que cet onglet est affiché ; désabonné via _unsubscribeCurrentTab en le quittant.
+    private UIElement BuildDevicesTab()
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(SectionTitle("Périphériques"));
+        panel.Children.Add(HelpText("Diagnostic en direct, indépendant des touches assignées : confirme que le clavier/la manette sont bien lus par l'app avant de chercher un problème de binding. Si une manette reste \"Non détectée\" ici alors que Windows la voit, elle ne parle probablement pas XInput (cas fréquent des manettes PlayStation branchées sans pilote XInput type DS4Windows) — l'app ne peut lire que du XInput (comme l'immense majorité des overlays d'input)."));
+
+        // --- Clavier ---
+        panel.Children.Add(new TextBlock { Text = "Clavier", Foreground = TextColor, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 4) });
+        var keyboardStatus = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(0x58, 0xD6, 0x8D)), Text = "Hook actif — appuie sur une touche pour tester." };
+        panel.Children.Add(keyboardStatus);
+        var lastKeyText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 4, 0, 0), Text = "Dernière touche détectée : —" };
+        panel.Children.Add(lastKeyText);
+
+        void OnKeyDown(int vk)
+        {
+            var name = System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk).ToString();
+            Dispatcher.Invoke(() => lastKeyText.Text = $"Dernière touche détectée : {name} ({DateTime.Now:HH:mm:ss})");
+        }
+        AppState.Hook.KeyDown += OnKeyDown;
+
+        // --- Manette ---
+        panel.Children.Add(new TextBlock { Text = "Manette (XInput)", Foreground = TextColor, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 20, 0, 4) });
+
+        var gamepadStatus = new TextBlock { FontWeight = FontWeights.SemiBold };
+        panel.Children.Add(gamepadStatus);
+
+        var buttonsWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+        var tilesByFlag = new Dictionary<ushort, Border>();
+        foreach (var (name, flag) in GamepadHook.Buttons)
+        {
+            var tile = new Border
+            {
+                Background = CardBg,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x40, 0x55)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 0, 6, 6),
+                Child = new TextBlock { Text = name, Foreground = SubtleText },
+            };
+            tilesByFlag[flag] = tile;
+            buttonsWrap.Children.Add(tile);
+        }
+        panel.Children.Add(buttonsWrap);
+
+        var triggersRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        var ltBar = new ProgressBar { Minimum = 0, Maximum = 255, Width = 140, Height = 12, Margin = new Thickness(0, 0, 16, 0) };
+        var rtBar = new ProgressBar { Minimum = 0, Maximum = 255, Width = 140, Height = 12 };
+        triggersRow.Children.Add(new TextBlock { Text = "LT ", Foreground = SubtleText, VerticalAlignment = VerticalAlignment.Center });
+        triggersRow.Children.Add(ltBar);
+        triggersRow.Children.Add(new TextBlock { Text = "  RT ", Foreground = SubtleText, VerticalAlignment = VerticalAlignment.Center });
+        triggersRow.Children.Add(rtBar);
+        panel.Children.Add(triggersRow);
+
+        var sticksText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 8, 0, 0), Text = "Stick gauche : (0, 0)   Stick droit : (0, 0)" };
+        panel.Children.Add(sticksText);
+
+        void RefreshConnectionUi(bool connected)
+        {
+            if (connected)
+            {
+                gamepadStatus.Text = $"Connectée (index XInput {AppState.Gamepad.ActiveIndex})";
+                gamepadStatus.Foreground = new SolidColorBrush(Color.FromRgb(0x58, 0xD6, 0x8D));
+            }
+            else
+            {
+                gamepadStatus.Text = "Non détectée";
+                gamepadStatus.Foreground = new SolidColorBrush(Color.FromRgb(0xE7, 0x4C, 0x3C));
+                foreach (var tile in tilesByFlag.Values) tile.Background = CardBg;
+                ltBar.Value = 0;
+                rtBar.Value = 0;
+                sticksText.Text = "Stick gauche : (0, 0)   Stick droit : (0, 0)";
+            }
+        }
+        RefreshConnectionUi(AppState.Gamepad.Connected);
+
+        void OnConnectionChanged(bool connected) => Dispatcher.Invoke(() => RefreshConnectionUi(connected));
+        AppState.Gamepad.ConnectionChanged += OnConnectionChanged;
+
+        void OnRawState(GamepadSnapshot snapshot)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                foreach (var (flag, tile) in tilesByFlag)
+                {
+                    var held = (snapshot.Buttons & flag) != 0;
+                    tile.Background = held ? new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A)) : CardBg;
+                    if (tile.Child is TextBlock tb) tb.Foreground = held ? Brushes.Black : SubtleText;
+                }
+                ltBar.Value = snapshot.LeftTrigger;
+                rtBar.Value = snapshot.RightTrigger;
+                sticksText.Text = $"Stick gauche : ({snapshot.LeftStickX}, {snapshot.LeftStickY})   Stick droit : ({snapshot.RightStickX}, {snapshot.RightStickY})";
+            });
+        }
+        AppState.Gamepad.RawStateChanged += OnRawState;
+
+        _unsubscribeCurrentTab = () =>
+        {
+            AppState.Hook.KeyDown -= OnKeyDown;
+            AppState.Gamepad.ConnectionChanged -= OnConnectionChanged;
+            AppState.Gamepad.RawStateChanged -= OnRawState;
+        };
+
+        return Wrap(panel);
     }
 
     // ================= Combos =================
@@ -812,6 +1072,92 @@ public partial class ControlPanelWindow : Window
         return Wrap(panel);
     }
 
+    /// <summary>Touches du profil actif + combos + apparence, format d'échange entre deux
+    /// installations (docs/amelioration.md piste #11). Classe privée dédiée plutôt que réutiliser
+    /// OverlaySettings tel quel : certains champs de OverlaySettings (MonitorIndex, ActiveProfile,
+    /// OnboardingCompleted...) sont spécifiques à la machine/session courante et ne devraient pas
+    /// écraser ceux de la machine de destination.</summary>
+    private sealed class ProfileBundle
+    {
+        public List<KeyBind> Binds { get; set; } = new();
+        public List<Combo> Combos { get; set; } = new();
+        public double Scale { get; set; } = 1.0;
+        public double Opacity { get; set; } = 1.0;
+        public bool SoundEnabled { get; set; }
+        public bool QuizMode { get; set; }
+        public bool ChainCombos { get; set; }
+        public int ChainStreakThreshold { get; set; } = 1;
+        public bool KeepStreakOnFail { get; set; }
+    }
+
+    private void ExportProfileBundle()
+    {
+        var bundle = new ProfileBundle
+        {
+            Binds = AppState.Binds,
+            Combos = AppState.Combos,
+            Scale = AppState.Settings.Scale,
+            Opacity = AppState.Settings.Opacity,
+            SoundEnabled = AppState.Settings.SoundEnabled,
+            QuizMode = AppState.Settings.QuizMode,
+            ChainCombos = AppState.Settings.ChainCombos,
+            ChainStreakThreshold = AppState.Settings.ChainStreakThreshold,
+            KeepStreakOnFail = AppState.Settings.KeepStreakOnFail,
+        };
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "Profil BrawlhallaOverlay (*.json)|*.json",
+            FileName = $"profil_{AppState.Settings.ActiveProfile}.json",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(bundle, options));
+        MessageBox.Show("Profil exporté.", "Export terminé", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void ImportProfileBundle()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Profil BrawlhallaOverlay (*.json)|*.json" };
+        if (dialog.ShowDialog() != true) return;
+
+        ProfileBundle? bundle;
+        try
+        {
+            bundle = JsonSerializer.Deserialize<ProfileBundle>(File.ReadAllText(dialog.FileName));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Fichier invalide : {ex.Message}", "Import impossible", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (bundle is null || bundle.Binds.Count == 0)
+        {
+            MessageBox.Show("Ce fichier ne contient pas de profil valide.", "Import impossible", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Ça va remplacer les touches du profil actif (« {AppState.Settings.ActiveProfile} ») et TOUTE la liste de combos actuelle ({AppState.Combos.Count} combo(s)) par le contenu du fichier ({bundle.Binds.Count} touche(s), {bundle.Combos.Count} combo(s)).\nContinuer ?",
+            "Confirmer l'import", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        AppState.ReplaceBinds(bundle.Binds);
+        AppState.ReplaceCombos(bundle.Combos);
+        AppState.Settings.Scale = bundle.Scale;
+        AppState.Settings.Opacity = bundle.Opacity;
+        AppState.Settings.SoundEnabled = bundle.SoundEnabled;
+        AppState.Settings.QuizMode = bundle.QuizMode;
+        AppState.Settings.ChainCombos = bundle.ChainCombos;
+        AppState.Settings.ChainStreakThreshold = bundle.ChainStreakThreshold;
+        AppState.Settings.KeepStreakOnFail = bundle.KeepStreakOnFail;
+        AppState.SaveSettings();
+
+        MessageBox.Show("Profil importé.", "Import terminé", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
     private void ExportSelectedCombo()
     {
         var idx = SelectedAbsoluteIndex();
@@ -1021,24 +1367,6 @@ public partial class ControlPanelWindow : Window
         };
         panel.Children.Add(opacityRow);
 
-        panel.Children.Add(Label("Position"));
-        var positionCombo = new ComboBox
-        {
-            Width = 220,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            ItemsSource = new[] { "Bas gauche", "Bas droite", "Haut gauche", "Haut droite", "Libre (glisser en jeu)" },
-            SelectedIndex = (int)AppState.Settings.Position,
-            Margin = new Thickness(0, 4, 0, 14),
-        };
-        positionCombo.SelectionChanged += (_, _) =>
-        {
-            AppState.Settings.Position = (OverlayPosition)positionCombo.SelectedIndex;
-            AppState.SaveSettings();
-        };
-        panel.Children.Add(positionCombo);
-
-        panel.Children.Add(HelpText("« Libre » est aussi choisi automatiquement dès que tu glisses le panneau à la souris en jeu (overlay déverrouillé)."));
-
         panel.Children.Add(Label("Écran"));
         var screens = System.Windows.Forms.Screen.AllScreens;
         var screenItems = new List<string> { "Écran principal" };
@@ -1063,21 +1391,6 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(screenCombo);
         panel.Children.Add(HelpText("Utile si Brawlhalla tourne sur un moniteur secondaire : sans ce réglage l'overlay reste toujours calé sur l'écran principal Windows."));
 
-        panel.Children.Add(Label("Longueur de l'historique de coups"));
-        var historySlider = new Slider { Minimum = 4, Maximum = 30, Value = AppState.Settings.MaxHistoryEntries, Width = 300, HorizontalAlignment = HorizontalAlignment.Left, TickFrequency = 1, IsSnapToTickEnabled = true };
-        var historyValue = new TextBlock { Foreground = TextColor, Margin = new Thickness(10, 0, 0, 0), Text = $"{AppState.Settings.MaxHistoryEntries} lignes" };
-        var historyRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 14) };
-        historyRow.Children.Add(historySlider);
-        historyRow.Children.Add(historyValue);
-        historySlider.ValueChanged += (_, e) =>
-        {
-            var value = (int)e.NewValue;
-            AppState.Settings.MaxHistoryEntries = value;
-            historyValue.Text = $"{value} lignes";
-            AppState.SaveSettings();
-        };
-        panel.Children.Add(historyRow);
-
         return Wrap(panel);
     }
 
@@ -1090,17 +1403,17 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(new TextBlock { Text = "Brawlhalla Input Overlay", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) });
         panel.Children.Add(new TextBlock { Text = "Mode Tutoriel + Panneau de contrôle", Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 20) });
 
-        panel.Children.Add(new TextBlock { Text = "Raccourcis clavier", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) });
+        panel.Children.Add(new TextBlock { Text = "Raccourcis clavier (reconfigurables : onglet Général, réglages avancés)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) });
         foreach (var (keys, desc) in new[]
         {
-            ("Ctrl+Alt+O", "Verrouiller / déverrouiller l'overlay"),
-            ("Ctrl+Alt+P", "Changer de mode (parmi les favoris)"),
-            ("Ctrl+Alt+K", "Changer le combo actif (mode Tutoriel)"),
-            ("Ctrl+Alt+R", "Démarrer / arrêter l'enregistrement d'un combo"),
-            ("Ctrl+Alt+U", "Ouvrir / donner le focus au panneau de contrôle"),
-            ("Ctrl+Alt+I", "Révéler temporairement le combo (« Cacher les étapes »)"),
-            ("Ctrl+Alt+H", "Suspendre / reprendre la capture (utile hors du jeu)"),
-            ("Ctrl+Alt+M", "Masquer / afficher complètement l'overlay (sans fermer l'app)"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.LockVk)}", "Verrouiller / déverrouiller l'overlay"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.ComboNextVk)}", "Combo suivante (mode Tutoriel)"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.ComboPrevVk)}", "Combo précédente (mode Tutoriel)"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.RecordVk)}", "Démarrer / arrêter l'enregistrement d'un combo"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.DashboardVk)}", "Ouvrir / donner le focus à l'accueil"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.RevealVk)}", "Révéler temporairement le combo (« Cacher les étapes »)"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.SuspendVk)}", "Suspendre / reprendre la capture (utile hors du jeu)"),
+            ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.HideVk)}", "Masquer / afficher complètement l'overlay (sans fermer l'app)"),
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
@@ -1114,9 +1427,8 @@ public partial class ControlPanelWindow : Window
         {
             ("Start + RB", "Combo suivante"),
             ("Start + LB", "Combo précédente"),
-            ("Start + Y", "Changer de mode"),
             ("Start + Back", "Suspendre / reprendre la capture"),
-            ("Start + X", "Ouvrir le panneau de contrôle"),
+            ("Start + X", "Ouvrir l'accueil"),
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };

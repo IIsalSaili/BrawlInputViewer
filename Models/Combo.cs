@@ -5,9 +5,10 @@ namespace BrawlhallaOverlay;
 
 /// <summary>
 /// How ComboRunner treats an input that doesn't match the current step.
-/// Only Strict is implemented for the MVP; IgnoreExtraneous is reserved for
-/// a later "tolerant" mode that would ignore pure-movement noise while
-/// waiting for an attack step.
+/// Both modes are implemented (see ComboRunner.Feed): in Strict, a direction
+/// held in addition to what the step requires is treated as a wrong input
+/// (reset). In IgnoreExtraneous, pure-movement noise held in addition to the
+/// required actions is ignored instead of failing the combo.
 /// </summary>
 public enum MatchMode
 {

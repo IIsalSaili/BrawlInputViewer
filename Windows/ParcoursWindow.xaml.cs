@@ -140,7 +140,7 @@ public partial class ParcoursWindow : Window
         Grid.SetColumn(_headerText, 0);
 
         var headerButtons = new StackPanel { Orientation = Orientation.Horizontal };
-        // Cette fenêtre peut s'ouvrir seule (bouton "Parcours" de StartupWindow), sans l'overlay
+        // Cette fenêtre peut s'ouvrir seule (bouton "Leçons" de DashboardWindow), sans l'overlay
         // ni son tray/sa barre de contrôle — sans ce bouton ici, aucun moyen de suspendre la
         // capture globale si un test révèle qu'elle réagit à autre chose (voir le commentaire de
         // OnGlobalKeyDown sur AppState.CaptureSuspended, bug repéré en testant ce Parcours).
@@ -155,7 +155,7 @@ public partial class ParcoursWindow : Window
 
         // Même raison que le bouton de suspension ci-dessus : la leçon 0.2 demande de
         // déverrouiller l'overlay via Ctrl+Alt+O, un raccourci géré par MainWindow — sans overlay
-        // ouverte à côté (cas du bouton "Parcours" de StartupWindow, hors parcours Débutant),
+        // ouverte à côté (cas du bouton "Leçons" de DashboardWindow, hors parcours Débutant),
         // Ctrl+Alt+O ne serait intercepté par personne. Ce bouton rend la leçon faisable dans
         // tous les cas, même si son effet visuel (l'overlay qui devient déplaçable) ne se voit
         // que si l'overlay est aussi ouverte.
