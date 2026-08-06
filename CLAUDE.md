@@ -84,7 +84,9 @@ Core/      AppState.cs (état partagé), KeyboardHook.cs (hook clavier bas nivea
 Windows/   DashboardWindow.xaml(.cs) (écran d'accueil, point d'entrée réel de
            l'app), MainWindow.xaml(.cs), ControlPanelWindow.xaml(.cs),
            ComboEditorWindow.xaml(.cs) — parmi les fenêtres WPF
-docs/      plan.md (doc de design du mode Tutoriel / refonte UI)
+docs/      TODO.md (pistes ouvertes pas encore faites, voir aussi la section
+           "Pistes évoquées mais pas demandées/faites" plus bas), plan_video_combo.md
+           (chantier en cours, voir ce fichier pour le détail)
 ```
 
 `App.xaml`, `App.xaml.cs`, `BrawlhallaOverlay.csproj`, `app.manifest`,
@@ -1155,6 +1157,24 @@ pas de résolution de conflit plus fine pour l'instant.
   `Combo.Steps` (`_directionIconsByIndex`/`ApplyMirrorDisplay`), et affiche
   un badge "Direction inversée détectée" au moment où l'inversion est
   verrouillée.
+- Priorité verticale sur horizontale (`Core/ComboRunner.NormalizeMovement`) :
+  troisième correctif du même ordre que les deux ci-dessus, sur signalement
+  de l'utilisateur — en jeu, tenir Haut ou Bas en même temps qu'une direction
+  horizontale écrase cette dernière, donc tenir Gauche+Bas revient exactement
+  à tenir Bas. En `MatchMode.Strict`, l'app comptait pourtant ce "Gauche" en
+  trop comme un excédent de mouvement fautif (`strictMovementViolation`) et
+  cassait le combo, alors qu'aucun input horizontal ne sort en jeu dans cette
+  situation. Les directions horizontales sont maintenant retirées **des deux
+  côtés de la comparaison** (ce que l'étape requiert ET ce qui est réellement
+  tenu) dès qu'une verticale est présente. Normaliser aussi le côté requis
+  n'est pas une symétrie décorative : sans ça, une étape enregistrée avec
+  Gauche+Bas tenus ensemble deviendrait impossible à satisfaire, puisque le
+  côté pressé aurait perdu son "Gauche". Haut+Bas tenus ensemble : les deux
+  sont conservés, aucune priorité entre verticales n'est supposée (non
+  vérifié en jeu — ne rien inventer). L'affichage des pastilles n'est pas
+  normalisé (une étape écrite "Gauche + Bas" montre toujours ses deux
+  icônes) : le moteur étant devenu plus permissif, l'écart ne peut que
+  tolérer un input, jamais en refuser un.
 - Version 13 (UX & onboarding) : audit complet de l'ergonomie
   (`docs/plan_ux_onboarding.md`) demandé après constat que le premier lancement
   restait un cul-de-sac (4 décisions d'affilée devant une liste de combos
@@ -1561,31 +1581,32 @@ pas de résolution de conflit plus fine pour l'instant.
   complet et statut à jour de chaque piste dans `docs/amelioration.md`.
 
 ## Pistes évoquées mais pas demandées/faites
-- ~~Réactiver les modes Historique et Grand affichage~~ — tranché en
-  Version 22 : l'utilisateur a choisi de les supprimer définitivement plutôt
-  que de les retravailler visuellement. Ne plus proposer cette piste.
-- Le "Parcours" pédagogique (`docs/plan_ux_onboarding.md` §4) : Chapitre 0
-  (prise en main de l'app), Chapitre 1 "Survivre" (Version 14), Chapitre 2
-  "Frapper" (Version 15) et Chapitre 3 "Bouger" (Version 16) faits — voir
-  Architecture (`ParcoursWindow`/`ParcoursCurriculum`) et les entrées
-  d'historique correspondantes. Restent les chapitres 4 et 5 (premier vrai
-  combo, techniques avancées). Nécessite de sourcer chaque
-  affirmation de jeu avant écriture ; la Version 14 a montré qu'interroger
-  directement l'utilisateur (qui joue réellement) puis recouper avec une
-  source écrite est plus fiable que scraper le web en premier — reproduire
-  cette méthode plutôt que fetch seul, avec test en jeu par l'utilisateur
-  comme arbitre final en cas de désaccord entre sources.
-- Raccourcis clavier rebindables (sortir les `VK_*` en dur de `MainWindow`
-  vers `settings.json` + écran de réassignation) — classé P2 dans le plan
-  UX, pas fait en Version 13.
-- Guide de rythme progressif (métronome sur la barre de tolérance) — classé
-  P2 dans le plan UX, pas fait en Version 13 : le timing a été retiré comme
-  condition d'échec sur demande explicite de l'utilisateur (voir plus haut),
-  toute réintroduction doit rester strictement indicative.
-- Profils multiples de configuration de touches — fait, voir section KeyBindConfig ci-dessus.
+
+**Liste complète et à jour : `docs/TODO.md`** (refonte visuelle DA
+Brawlhalla-like, Parcours chapitre 5, combos de légende, détection de tech
+skip, comparaison de sessions, mode hors-jeu assumé, métronome, vigilance
+familles de combos). Ce document remplace les anciens `docs/Brawhl.md` /
+`docs/amelioration.md` / `docs/audit_features.md` / `docs/combo_families_plan.md`
+/ `docs/plan.md` / `docs/plan_ux_onboarding.md` (supprimés le 2026-08-05, leur
+contenu implémenté est déjà décrit dans ce fichier CLAUDE.md ci-dessus, leur
+contenu encore ouvert est repris dans `docs/TODO.md`).
+
+Rappels rapides de ce qui est **définitivement tranché** (ne pas reproposer,
+détail dans `docs/TODO.md`) :
+- Réactiver les modes Historique et Grand affichage — supprimés
+  définitivement en Version 22, choix explicite de l'utilisateur.
+- Réintroduire les portraits "splash art" — tranché en Version 20.
+- Retour du timing comme condition d'échec de combo — retiré sur demande
+  explicite, ne doit pas revenir même sous forme de métronome strict.
 - Intégration d'une API externe Brawlhalla (stats de match) — écarté pour
-  rester un outil 100% local sans dépendance réseau/ToS tiers, à ne faire que
-  sur demande explicite (voir section 2.5 de `docs/audit_features.md`).
+  rester un outil 100% local, à ne faire que sur demande explicite.
+
+Et ce qui est déjà fait malgré d'anciennes mentions "pas fait" dans des docs
+supprimés : raccourcis clavier globaux rebindables (Version 22), profils
+multiples de touches (voir section KeyBindConfig plus haut), lancement auto
+Windows (`StartupConfig.cs`), icône dans la barre système (tray icon),
+Parcours chapitre 4 (Version 22).
+
 - Pas de tests automatisés — vérifications faites manuellement via capture
   d'écran + simulation d'appuis clavier (`keybd_event` par P/Invoke depuis
   PowerShell) pendant le développement. Attention si le jeu est au premier
@@ -1593,6 +1614,3 @@ pas de résolution de conflit plus fine pour l'instant.
   cas (ça part sur le système entier, pas juste sur l'app) — vérifier plutôt
   via un changement temporaire de `DefaultMode` dans `settings.json`, ou
   demander confirmation avant de tester.
-- ~~Lancement automatique au démarrage de Windows~~ — fait (`StartupConfig.cs`
-  + case à cocher dans l'onglet Général).
-- ~~Icône dans la barre système~~ — fait (tray icon, voir `MainWindow.xaml.cs`).

@@ -50,6 +50,12 @@ public enum ComboFailReason
 ///   (sauter en bougeant est normal en jeu), même en MatchMode.Strict et sans
 ///   que ComboStep.FreeMovement soit coché — pas besoin de le configurer à la
 ///   main pour chaque étape de saut, voir requiresJump ci-dessous.
+/// - Priorité verticale : en jeu, tenir Haut ou Bas en même temps qu'une
+///   direction horizontale écrase cette dernière — tenir Gauche+Bas revient
+///   exactement à tenir Bas. Les directions horizontales sont donc retirées
+///   des deux côtés de la comparaison dès qu'une verticale est présente (voir
+///   NormalizeMovement) : une horizontale tenue en plus d'un Bas/Haut requis
+///   n'est plus un excédent fautif en Strict, puisqu'elle ne sort pas en jeu.
 /// - Gauche/Droite d'un combo sont symétriques : la 1ère fois qu'une étape
 ///   exige une direction gauche/droite alors que le joueur presse l'opposée
 ///   (et que le reste de l'étape correspond), toute la tentative en cours
@@ -122,12 +128,13 @@ public sealed class ComboRunner
         // On ne juge une étape que sur ses boutons d'action (Group == "Action") :
         // les directions tenues en plus (Group == "Movement") ne comptent jamais
         // contre le joueur, tenir une direction en enchaînant est normal.
-        var pressedMovement = new HashSet<string>(pressedBindsThisTick
-            .Where(b => b.Group == "Movement").Select(b => b.Action));
+        var pressedMovement = NormalizeMovement(new HashSet<string>(pressedBindsThisTick
+            .Where(b => b.Group == "Movement").Select(b => b.Action)));
         var pressedAction = new HashSet<string>(pressedBindsThisTick
             .Where(b => b.Group != "Movement").Select(b => b.Action));
 
         var (requiredMovementNames, requiredAction) = SplitByMovement(required, pressedBindsThisTick);
+        requiredMovementNames = NormalizeMovement(requiredMovementNames);
 
         // Verrouille (une seule fois par tentative) si cette étape se joue en miroir —
         // voir docstring de classe. Doit tourner avant toute comparaison de mouvement
@@ -256,6 +263,32 @@ public sealed class ComboRunner
         _lastConsumedActionKeys = new HashSet<string>();
         ResetMirrorState();
         ComboReset?.Invoke();
+    }
+
+    /// <summary>
+    /// Applique la priorité verticale du jeu à un ensemble de directions : tenir Haut ou
+    /// Bas en même temps qu'une direction horizontale écrase cette dernière en jeu (tenir
+    /// Gauche+Bas revient exactement à tenir Bas ; idem Gauche+Haut ≡ Haut). Les
+    /// horizontales sont donc retirées dès qu'une verticale est présente — elles ne
+    /// sortent pas en jeu, donc ni les exiger ni les compter comme un excédent fautif
+    /// n'aurait de sens.
+    ///
+    /// Appliqué des DEUX côtés de la comparaison (ce qui est requis par l'étape ET ce qui
+    /// est réellement tenu) : sans normaliser aussi le requis, une étape enregistrée avec
+    /// Gauche+Bas tenus ensemble deviendrait impossible à satisfaire, puisque le côté
+    /// pressé, lui, aurait perdu son "Gauche".
+    ///
+    /// Haut+Bas tenus ensemble : les deux sont conservés, aucune priorité entre verticales
+    /// n'est supposée ici (comportement de jeu non vérifié — ne rien inventer).
+    /// </summary>
+    private static HashSet<string> NormalizeMovement(HashSet<string> movement)
+    {
+        if (!movement.Contains("Haut") && !movement.Contains("Bas")) return movement;
+
+        var result = new HashSet<string>(movement);
+        result.Remove("Gauche");
+        result.Remove("Droite");
+        return result;
     }
 
     /// <summary>Actions de direction qui ont un opposé gauche/droite (Haut/Bas ne sont
