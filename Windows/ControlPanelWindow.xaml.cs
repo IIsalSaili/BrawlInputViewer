@@ -425,6 +425,133 @@ public partial class ControlPanelWindow : Window
         sessionRow.Children.Add(exportSessionBtn);
         advancedPanel.Children.Add(sessionRow);
 
+        advancedPanel.Children.Add(SectionTitle("Détection de hit (expérimental)"));
+        advancedPanel.Children.Add(HelpText("Surveille une petite zone du HUD (dégâts de l'ADVERSAIRE) et affiche un badge quand elle change — aucun montant lu, juste \"quelque chose a changé\". Purement informatif : ne fait jamais échouer ni réussir un combo. Nécessite d'avoir activé \"Nombre de dégâts\" dans les réglages Brawlhalla et de calibrer la zone une fois par résolution d'écran. Voir docs/plan_improve_combo.md."));
+
+        var hudRoiStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 4) };
+        void UpdateHudRoiStatus()
+        {
+            hudRoiStatus.Text = AppState.Settings.HudRoiCalibrated
+                ? $"Zone calibrée : {AppState.Settings.HudRoiWidth}×{AppState.Settings.HudRoiHeight}px à ({AppState.Settings.HudRoiX},{AppState.Settings.HudRoiY})."
+                : "Aucune zone calibrée pour l'instant.";
+        }
+        UpdateHudRoiStatus();
+        advancedPanel.Children.Add(hudRoiStatus);
+
+        var hudEnabledCheck = new CheckBox
+        {
+            Content = "Activer la détection de hit",
+            Foreground = TextColor,
+            IsChecked = AppState.Settings.HudDetectionEnabled,
+            IsEnabled = AppState.Settings.HudRoiCalibrated,
+            Margin = new Thickness(0, 4, 0, 4),
+        };
+        hudEnabledCheck.Checked += (_, _) => { AppState.Settings.HudDetectionEnabled = true; AppState.SaveSettings(); };
+        hudEnabledCheck.Unchecked += (_, _) => { AppState.Settings.HudDetectionEnabled = false; AppState.SaveSettings(); };
+
+        var hudRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        var calibrateBtn = new Button { Content = "Calibrer la zone…", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0) };
+        calibrateBtn.Click += (_, _) =>
+        {
+            Hide();
+            var calib = new HudCalibrationWindow();
+            calib.ShowDialog();
+            Show();
+            if (calib.Result is { } r)
+            {
+                AppState.Settings.HudRoiX = r.X;
+                AppState.Settings.HudRoiY = r.Y;
+                AppState.Settings.HudRoiWidth = r.Width;
+                AppState.Settings.HudRoiHeight = r.Height;
+                AppState.Settings.HudRoiCalibrated = true;
+                AppState.SaveSettings();
+                UpdateHudRoiStatus();
+                hudEnabledCheck.IsEnabled = true;
+                hudEnabledCheck.IsChecked = true; // active tout de suite pour un retour en direct sans clic supplémentaire
+            }
+        };
+        hudRow.Children.Add(calibrateBtn);
+        advancedPanel.Children.Add(hudRow);
+        advancedPanel.Children.Add(hudEnabledCheck);
+
+        // Retour en direct (pas juste au moment d'un vrai hit) : sans ça, la seule façon de
+        // vérifier que le calibrage vise la bonne zone était d'attendre un hit en jeu — demande
+        // explicite de l'utilisateur. S'abonne à Sampled (levé à chaque capture, changement ou
+        // non), désabonné avec le reste de l'onglet.
+        var hudLiveText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 12), FontFamily = new FontFamily("Consolas") };
+        hudLiveText.Text = AppState.Settings.HudDetectionEnabled ? "En attente d'une lecture…" : "Inactif (coche \"Activer la détection de hit\" pour voir un retour en direct).";
+        advancedPanel.Children.Add(hudLiveText);
+        void HudSampledHandler(double ratio) => Dispatcher.Invoke(() => hudLiveText.Text = $"Dernière lecture : {ratio * 100:0.0} % de la zone a changé.");
+        AppState.HudDamageSource.Sampled += HudSampledHandler;
+
+        advancedPanel.Children.Add(HelpText("Palier de dégâts par couleur : lit la couleur de la barre sous l'icône ADVERSAIRE (Blanc/Jaune/Orange/Rouge/Noir, les paliers officiels 0/50/100/150/200%) — aucun réglage de jeu requis, contrairement à la détection de hit ci-dessus."));
+
+        var hudTierRoiStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 4) };
+        void UpdateHudTierRoiStatus()
+        {
+            hudTierRoiStatus.Text = AppState.Settings.HudTierRoiCalibrated
+                ? $"Zone calibrée : {AppState.Settings.HudTierRoiWidth}×{AppState.Settings.HudTierRoiHeight}px à ({AppState.Settings.HudTierRoiX},{AppState.Settings.HudTierRoiY})."
+                : "Aucune zone calibrée pour l'instant.";
+        }
+        UpdateHudTierRoiStatus();
+        advancedPanel.Children.Add(hudTierRoiStatus);
+
+        var hudTierEnabledCheck = new CheckBox
+        {
+            Content = "Activer le palier de dégâts par couleur",
+            Foreground = TextColor,
+            IsChecked = AppState.Settings.HudTierDetectionEnabled,
+            IsEnabled = AppState.Settings.HudTierRoiCalibrated,
+            Margin = new Thickness(0, 4, 0, 4),
+        };
+        hudTierEnabledCheck.Checked += (_, _) => { AppState.Settings.HudTierDetectionEnabled = true; AppState.SaveSettings(); };
+        hudTierEnabledCheck.Unchecked += (_, _) => { AppState.Settings.HudTierDetectionEnabled = false; AppState.SaveSettings(); };
+
+        var hudTierRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        var calibrateTierBtn = new Button { Content = "Calibrer la couleur…", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 6, 0) };
+        calibrateTierBtn.Click += (_, _) =>
+        {
+            Hide();
+            var calib = new HudCalibrationWindow("Dessine un PETIT rectangle collé à la barre de couleur sous l'icône de l'ADVERSAIRE (blanc/jaune/orange/rouge/noir selon ses dégâts). Entrée pour valider, Échap pour annuler.");
+            calib.ShowDialog();
+            Show();
+            if (calib.Result is { } r)
+            {
+                AppState.Settings.HudTierRoiX = r.X;
+                AppState.Settings.HudTierRoiY = r.Y;
+                AppState.Settings.HudTierRoiWidth = r.Width;
+                AppState.Settings.HudTierRoiHeight = r.Height;
+                AppState.Settings.HudTierRoiCalibrated = true;
+                AppState.SaveSettings();
+                UpdateHudTierRoiStatus();
+                hudTierEnabledCheck.IsEnabled = true;
+                hudTierEnabledCheck.IsChecked = true; // active tout de suite pour un retour en direct sans clic supplémentaire
+            }
+        };
+        hudTierRow.Children.Add(calibrateTierBtn);
+        advancedPanel.Children.Add(hudTierRow);
+        advancedPanel.Children.Add(hudTierEnabledCheck);
+
+        // Même principe que le retour en direct de la détection de hit ci-dessus : un carré de
+        // la couleur réellement lue + le palier déduit, mis à jour à chaque capture.
+        var hudTierLiveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 12) };
+        var hudTierSwatch = new Border { Width = 20, Height = 20, Margin = new Thickness(0, 0, 8, 0), BorderBrush = SubtleText, BorderThickness = new Thickness(1), Background = Brushes.Transparent };
+        var hudTierLiveText = new TextBlock { Foreground = SubtleText, FontFamily = new FontFamily("Consolas"), VerticalAlignment = VerticalAlignment.Center };
+        hudTierLiveText.Text = AppState.Settings.HudTierDetectionEnabled ? "En attente d'une lecture…" : "Inactif (coche \"Activer le palier de dégâts par couleur\" pour voir un retour en direct).";
+        hudTierLiveRow.Children.Add(hudTierSwatch);
+        hudTierLiveRow.Children.Add(hudTierLiveText);
+        advancedPanel.Children.Add(hudTierLiveRow);
+        void HudTierSampledHandler((int R, int G, int B, DamageTier? HueHint) sample) => Dispatcher.Invoke(() =>
+        {
+            // Même principe que MainWindow.OnHudTierSampled : le palier affiché fait foi sur
+            // AppState.HudTierSource.CurrentTier (la machine à états), l'indice de teinte n'est
+            // qu'une info diagnostique en plus, pas la source de vérité.
+            hudTierSwatch.Background = new SolidColorBrush(Color.FromRgb((byte)sample.R, (byte)sample.G, (byte)sample.B));
+            var hueNote = sample.HueHint is { } t ? HudTierLabel(t) : "non concluant";
+            hudTierLiveText.Text = $"rgb({sample.R},{sample.G},{sample.B}) — palier détecté : {HudTierLabel(AppState.HudTierSource.CurrentTier)}  (indice teinte : {hueNote})";
+        });
+        AppState.HudTierSource.Sampled += HudTierSampledHandler;
+
         var advancedExpander = new Expander
         {
             Header = "Réglages avancés",
@@ -439,6 +566,8 @@ public partial class ControlPanelWindow : Window
         {
             AppState.CaptureSuspendedChanged -= SuspendHandler;
             AppState.OverlayHiddenChanged -= HideHandler;
+            AppState.HudDamageSource.Sampled -= HudSampledHandler;
+            AppState.HudTierSource.Sampled -= HudTierSampledHandler;
         };
 
         return Wrap(panel);
@@ -479,6 +608,16 @@ public partial class ControlPanelWindow : Window
         File.WriteAllLines(dialog.FileName, lines);
         MessageBox.Show($"Session exportée : {AppState.SessionLog.Count} coup(s).", "Export terminé", MessageBoxButton.OK, MessageBoxImage.Information);
     }
+
+    private static string HudTierLabel(DamageTier tier) => tier switch
+    {
+        DamageTier.White => "Blanc (0-49%)",
+        DamageTier.Yellow => "Jaune (50-99%)",
+        DamageTier.Orange => "Orange (100-149%)",
+        DamageTier.Red => "Rouge (150-199%)",
+        DamageTier.Black => "Noir (200%+)",
+        _ => tier.ToString(),
+    };
 
     private static string LockLabel() => AppState.Locked ? "Déverrouiller l'overlay" : "Verrouiller l'overlay";
     private static string SuspendLabel() => AppState.CaptureSuspended ? "Reprendre la capture" : "Suspendre la capture (hors du jeu)";

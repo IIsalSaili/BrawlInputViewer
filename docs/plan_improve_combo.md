@@ -29,8 +29,8 @@ construire.** Classé par (valeur × probabilité de succès) / coût :
 | # | Route | Ce que ça donne | Coût | Risque | Verdict |
 |---|---|---|---|---|---|
 | **R1** | OCR du HUD (dégâts, stocks) | « le coup a touché / pour combien » en temps réel | **faible** (2-4 j) | très faible | **à faire en premier** |
-| **R2** | Parsing des `.replay` | vérité terrain complète post-match (inputs frame par frame, KO, perso, arme) | moyen (RE partielle nécessaire, §3.2) | nul (fichier local) | **à faire en second** |
-| **R3** | `-writestats` (option officielle du jeu) | stats de fin de match écrites par le jeu lui-même | faible **si** ça marche hors spectateur | nul | **à tester avant R2** (30 min de test) |
+| **R2** | Parsing des `.replay` | vérité terrain post-match (inputs, KO, perso, arme) | — | nul (fichier local) | **testé le 2026-08-06, abandonné** — le fichier ne s'écrit que pour un match avec fin de partie ; la salle d'entraînement (usage réel de l'app) n'en génère jamais (§3.2) |
+| **R3** | `-writestats` (option officielle du jeu) | stats de fin de match écrites par le jeu lui-même | — | nul | **testé le 2026-08-06, négatif** — n'écrit rien pour un match joué soi-même, seulement en mode spectateur (§3.3) : **écarté** |
 | **R4** | Classifieur d'animation (la demande) | « quel move est sorti » image par image | **très élevé** (voir §4) | élevé (perf, dataset, dérive à chaque patch) | phase 3, **seulement si R1+R2 ne suffisent pas** |
 | **R5** | Lecture mémoire du jeu | tout, parfaitement | moyen | **inacceptable** (anti-ban) | **exclu définitivement** |
 
@@ -187,81 +187,148 @@ true combo / string de `plan_split_combo.md`. Formulation correcte côté UI :
 confirmé ». Pour trancher l'inesquivabilité il faudrait un adversaire qui essaie
 réellement — donc de la mesure en match réel, sur plusieurs tentatives.
 
-### 3.2 R2 — Parser les `.replay` (vérité terrain, post-match)
+#### 3.1.2 État d'implémentation (2026-08-06)
 
-**Ce que j'ai vérifié moi-même sur ta machine**, pas lu dans un README :
+**1a construit, testé en jeu, réglé deux fois** — voir `Core/Vision/ScreenRegionCapture.cs`
+(capture GDI `Graphics.CopyFromScreen`, pas WGC : pour une ROI de quelques centaines de
+pixels à 8 Hz, l'interop WinRT du §4.1 n'apporte rien, choix documenté dans le fichier),
+`Core/Vision/HudDamageSource.cs`, `Windows/HudCalibrationWindow.xaml(.cs)` (calibrage par
+clic-glisse, réutilisable — voir plus bas). Deux ajustements suite au premier test réel :
+- Le seuil de déclenchement initial (8 % des pixels de la ROI) ne détectait que les
+  changements massifs (mort, reset de jauge) — abaissé à 1,5 %, qui capture les hits
+  normaux sans faux positif observé.
+- Un lancement d'arme (« Lancer ») fait souvent 1-2 points de dégâts, un delta de pixels
+  trop petit même à 1,5 % sans risquer des faux positifs sur tous les autres hits.
+  Plutôt que de baisser le seuil globalement, `MainWindow.UpdateHudSensitivityForCurrentStep`
+  bascule vers un seuil bien plus sensible (0,4 %, plus de faux positifs acceptés)
+  **uniquement pendant la fenêtre où l'étape de combo en cours exige « Lancer »** — demande
+  explicite de l'utilisateur : prendre le risque seulement là où ça a du sens.
 
-- Tu as **549 fichiers `.replay`** dans `C:\Users\ilias\BrawlhallaReplays`,
-  version de jeu 10.08 / 10.09.
-- Le format est bien : **zlib** (en-tête `78 DA`) → **XOR** avec une clé de 64
-  octets → flux **de bits** MSB-first. J'ai décodé un de tes fichiers réels
-  (`[10.09] SmallWorld'sEnd (7).replay`, 29 197 octets décompressés) : la clé
-  XOR publique de 2022 **fonctionne toujours** en 10.09.
-- Ce qui a changé depuis les parsers publics (qui ciblent la 9.08) : le flux
-  commence par un **`u32` de version** (valeur **268** sur ton fichier, contre
-  253 en 9.08) et les tags d'état font **4 bits** (et non 3). Avec cette
-  correction, j'ai extrait proprement `playlist=26688
-  "PlaylistType_2v2Unranked_DisplayName"` et `level=233`.
-- **Ce qui ne marche pas encore** : le bloc `PlayerData`/`GameSettings` a dérivé
-  (un ou plusieurs champs ajoutés depuis la 9.08). J'ai testé
-  automatiquement 270 hypothèses simples (nombre de champs de `GameSettings`,
-  champs ajoutés autour de `connection_time` / du bloc héros, `avatar_id` en 16
-  ou 32 bits) : **aucune ne recolle**. Il y a donc une vraie petite passe de
-  reverse-engineering à faire (estimation : une demi-journée à une journée, avec
-  un excellent oracle — on connaît les noms de joueurs, les légendes jouées et
-  les maps de nos propres matchs).
+**1b : la route « montant exact par OCR » a été abandonnée avant d'être codée**, remplacée
+par quelque chose de plus simple et plus robuste. Objection de l'utilisateur qui a fait
+tomber l'OCR à gabarits (2026-08-06) : ce qui compte réellement, ce n'est pas le chiffre
+exact mais **le palier de dégâts** (Blanc/Jaune/Orange/Rouge/Noir aux seuils officiels
+0/50/100/150/200 %, voir §3.1 plus haut) — et ce palier est déjà **encodé en couleur par le
+jeu lui-même**, sur la barre sous l'icône du joueur, **sans avoir besoin d'activer « Damage
+Numbers »**. Lire une couleur moyenne et la classer par teinte ne demande aucun gabarit de
+police à fabriquer, contrairement à l'OCR — implémenté dans
+`Core/Vision/HudDamageTierSource.cs` : couleur moyenne de la ROI → conversion teinte (HSV) →
+classification par seuils de teinte (pas de RGB de référence exacts du jeu, juste des
+plages de teinte nommées) → événement seulement après 2 lectures stables consécutives
+(évite de déclencher sur l'anim de transition entre paliers). Réutilise
+`HudCalibrationWindow` (rendue générique avec un texte d'instruction paramétrable plutôt que
+dupliquée) pour calibrer une petite zone collée à la barre. Ni le montant exact ni la
+corrélation de portrait de légende (§3.1.1b) n'ont été implémentés — la seconde reste une
+piste ouverte si le besoin de contextualiser par légende adverse se confirme.
 
-**Ce que le format contient une fois parsé** (structure confirmée par les
-parsers publics et cohérente avec ce que j'ai décodé) :
+**Pas encore testé en jeu** (implémenté à la fin d'une session, en attente d'un test réel) —
+à valider : la classification par teinte tient-elle en conditions réelles (thème de couleur
+du joueur, luminosité d'écran), et la stabilisation à 2 lectures suffit-elle à éviter les
+faux déclenchements pendant l'animation de transition entre paliers.
 
-- `inputs[entityId] = [{ timestamp, inputState }]` — **l'état des boutons
-  horodaté, sous forme de bitmap 14 bits**, pour *tous* les joueurs (donc aussi
-  l'adversaire) ;
-- `deaths[]` (entityId + timestamp), `results` (score final), `length` ;
-- les entités : nom, équipe, **`heroId` (la légende), `costumeId`, `stance`**,
-  skins d'armes ; plus `levelId`, réglages de partie.
+**Révision du classifieur (2026-08-07)** : l'utilisateur a fourni de vraies captures des 5
+icônes de palier du jeu, et a fait une observation qui change le mécanisme central. Les 5
+paliers sont dans un **ordre fixe et monotone croissant** pendant une vie (White→Yellow→
+Orange→Red→Black, jamais de retour en arrière sauf mort/reset) — donc **classifier
+précisément chaque couleur n'est pas nécessaire**. Il suffit de savoir (a) reconnaître Blanc
+avec confiance (facile : faible saturation + forte luminosité, c'est le seul palier qu'on a
+vraiment besoin de distinguer avec certitude, et il sert de reset dur — "si le chiffre
+retombe à 0 c'est forcément blanc") et (b) détecter qu'un changement de couleur a eu lieu
+(peu importe précisément lequel). `HudDamageTierSource` a été réécrit en conséquence : une
+machine à états qui **avance d'un cran dans le cycle fixe** à chaque changement de couleur
+détecté, sauf si la classification par teinte est confiante et donne une réponse différente
+(auquel cas elle prime, ex. un gros combo qui saute directement de Jaune à Rouge). L'app
+« sait toujours au moins une couleur » comme demandé — jamais d'état inconnu après le premier
+palier.
 
-**Ce que ça vaut pour l'app** :
+Piste non retenue pour l'instant, mais notée : croiser ça avec le nombre de chiffres affichés
+dans la zone de dégâts (`HudDamageSource`, ROI séparée) pour confirmer un retour à 0% avec un
+second signal indépendant. Non implémenté — la détection directe de Blanc par couleur couvre
+déjà ce cas, ce croisement resterait une confirmation redondante à évaluer seulement si le
+test réel montre que la détection de Blanc seule ne suffit pas.
 
-- **Une vérité terrain gratuite et exacte** pour valider tout le reste : on peut
-  rejouer nos propres logs clavier contre le replay du même match et mesurer
-  l'écart. C'est aussi **la seule façon honnête de calibrer un futur modèle de
-  vision** (§4.4).
-- Un **débrief post-match** : combos réellement tentés, KO, tendances de
-  l'adversaire. Un outil tiers fait déjà exactement ça (BRAT, §10) — preuve que
-  c'est faisable, pas une spéculation.
-- **La sémantique du bitmap 14 bits n'est documentée nulle part** — mais on n'a
-  pas besoin de la deviner : l'app **connaît déjà nos propres appuis horodatés**
-  (`AppState.SessionLog`). Il suffit de corréler notre log avec les inputs du
-  replay du même match pour **déduire empiriquement quel bit = quel bouton**.
-  C'est le genre de sourcing qui ne peut pas être halluciné, contrairement aux
-  combos.
+### 3.2 R2 — Parser les `.replay` : **abandonné, non pertinent pour l'usage réel**
 
-**Limites** : post-match uniquement (le fichier est écrit à la fin), donc aucun
-feedback en direct ; et le format casse potentiellement à **chaque patch** du
-jeu (c'est exactement ce qui vient d'arriver aux parsers publics). Un parser
-maison doit donc être **tolérant à l'échec** : si la version est inconnue, on
-n'affiche rien, on ne plante pas.
+Chantier de reverse-engineering mené le 2026-08-06, puis **arrêté** suite à un
+test qui invalide la prémisse même de la route — pas faute de résultats
+techniques, mais parce que le résultat ne sert à rien pour ce que l'app fait
+réellement. Détail conservé ci-dessous pour ne pas refaire le travail si la
+question revient un jour, mais **ne pas relancer ce chantier sans relire le
+verdict final en fin de section**.
 
-### 3.3 R3 — `-writestats` : laisser le jeu écrire lui-même les stats
+**Ce qui a été vérifié techniquement, sur des vrais fichiers de la machine**
+(deux replays réels, un match privé et un classé 3v3) :
+
+- Conteneur : **zlib** (en-tête `78 DA`) → **XOR** (clé publique de 64 octets,
+  toujours valide en 10.09) → flux **de bits** MSB-first.
+- En-tête (état 3) entièrement décodé et validé : `version(u32) + tag(4 bits) +
+  seed(u32) + playlistId(u32) + [nom de playlist si id≠0] + enLigne(bool)` —
+  confirmé en récupérant littéralement `"PlaylistType_Ranked3v3_DisplayName"`
+  depuis un vrai fichier.
+- Préambule de partie (début état 4) : `15 entiers de réglages + levelId(u32)
+  + heroCount(u16) + 1 champ inconnu(u32)` — confirmé par convergence
+  indépendante sur deux fichiers différents.
+- Le **premier joueur** (systématiquement moi, "Ilias") se décode intégralement
+  de façon plausible sur les deux fichiers : id, nom, personnalisation,
+  légende jouée, costume, skins d'arme, équipe.
+- **Le deuxième joueur et au-delà cassent** : un champ diffère (probablement
+  conditionnel selon bot/statut réseau), jamais résolu — une recherche par
+  empreinte structurelle pour localiser directement la section inputs sans
+  dépendre du bloc joueurs a donné des candidats non confirmés.
+
+**Pourquoi c'est arrêté avant d'aller plus loin** (constat de l'utilisateur,
+2026-08-06, qui a fait tomber toute la section) : **le fichier `.replay` ne
+s'écrit qu'à la fin d'un match qui a une condition de fin** (score, stock,
+temps). Vérifié deux fois en conditions réelles : une session interrompue par
+Alt+F4 n'écrit rien (attendu), mais surtout **une session complète en salle
+d'entraînement (mannequin, quittée proprement par le menu) n'écrit rien non
+plus** — testé le 2026-08-06, aucun fichier nouveau après 5 minutes de drill.
+La salle d'entraînement n'a pas de condition de fin de match, donc pas
+d'événement qui déclenche l'écriture d'un replay.
+
+**Conséquence, sans détour** : la seule chose que R2 aurait pu lire
+(inputs/légende/résultat) n'existe **que pour un vrai match joué contre un
+adversaire jusqu'à son terme** — jamais pour une session de drill en salle
+d'entraînement, qui est **l'usage réel et quasi exclusif de l'app** (le mode
+Tutoriel tourne pendant qu'on répète des combos contre un mannequin, pas
+pendant des matchs classés). Même en supposant le format entièrement résolu
+(deuxième joueur inclus), R2 n'aurait rien eu à offrir au cas d'usage que ce
+document est censé servir. Ce n'est pas une limite technique qu'on pourrait
+contourner avec plus de RE — c'est une incompatibilité de fond entre ce que
+la route peut lire et ce que l'app fait.
+
+**Leçon pour la suite du document** : ça invalide aussi une partie du
+raisonnement du §0 qui classait R2 devant R4 sur la base de son faible coût —
+le coût n'était pas le bon critère de comparaison, la pertinence au cas
+d'usage l'était. **R1 (HUD) ne souffre pas de ce problème** : il lit l'écran
+pendant que le jeu tourne, y compris en salle d'entraînement, donc reste la
+route prioritaire (voir §3.1 et la roadmap révisée en §7).
+
+### 3.3 R3 — `-writestats` : **testé, négatif pour notre cas d'usage**
 
 Brawlhalla a une option de lancement officielle **`-writestats`** qui écrit des
-statistiques de match en JSON dans `BrawlhallaStatDumps` et `BrawlhallaStatsLive`
-(le nom du second dossier suggère une écriture **pendant** le match). Des outils
-de streaming l'exploitent déjà pour afficher des stats de fin de match
-(dégâts infligés/subis, etc.).
+statistiques de match en JSON dans `BrawlhallaStatDumps` et `BrawlhallaStatsLive`.
+Des outils de streaming l'exploitent pour afficher des stats de fin de match.
 
-**Pourquoi c'est en tête de liste malgré une doc pauvre** : si ça fonctionne, on
-obtient des données **produites par le jeu lui-même**, sans OCR, sans RE, sans
-ML, et sans la moindre zone grise vis-à-vis de l'anti-cheat — le jeu écrit un
-fichier, on le lit.
+**Test effectué le 2026-08-06** : option ajoutée aux options de lancement Steam
+(`localconfig.vdf` confirmé : `"LaunchOptions" "-writestats"`), un match privé
+1v1 joué jusqu'au bout (confirmé par l'apparition normale d'un nouveau
+`.replay`, `[10.09] SmallBrawlhaven (87).replay`), puis scan large du profil
+Windows et du dossier d'installation du jeu juste après. **Aucun fichier créé
+nulle part** — ni `BrawlhallaStatDumps`, ni `BrawlhallaStatsLive` (les deux
+dossiers restent absents), ni ailleurs.
 
-**Le doute à lever, et il est sérieux** : la doc communautaire dit que ça
-enregistre les matchs **que l'utilisateur spectate**. Si c'est limité au mode
-spectateur, ça ne sert pas pour un entraînement solo. **C'est un test de 30
-minutes** (ajouter l'option de lancement, jouer un match d'entraînement, aller
-voir si un fichier apparaît et ce qu'il contient) et il doit être fait **avant**
-d'investir dans R1 ou R2, parce qu'un résultat positif change le plan.
+**Conclusion : la doc communautaire avait raison — `-writestats` n'écrit que
+pour les matchs spectatés, pas pour un match joué soi-même**, privé ou non.
+Écarté comme route pour ce projet (l'app n'a pas vocation à spectate ses propres
+sessions d'entraînement). Un premier essai interrompu par Alt+F4 avait aussi
+échoué, mais était non concluant (le jeu tué avant la fin d'un match n'écrit
+même pas de `.replay` normal — pas une preuve contre `-writestats`
+spécifiquement) ; c'est le second test, avec match terminé normalement, qui
+tranche. Option de lancement retirée après le test.
+
+**Conséquence sur la roadmap** : passer directement à R1 (HUD) et R2 (replays),
+qui ne dépendent pas du mode spectateur.
 
 ### 3.4 R4 — Le classifieur d'animation (la demande d'origine)
 
@@ -489,10 +556,9 @@ capture. Désactivé par défaut, comme `AutoHideEnabled`.
 
 ## 7. Roadmap proposée, avec critères d'abandon
 
-**Phase 0 — 30 minutes.** Tester `-writestats` (R3) : lancer Brawlhalla avec
-l'option, jouer un match d'entraînement solo, inspecter `BrawlhallaStatDumps` /
-`BrawlhallaStatsLive`. → *Si le jeu écrit des stats exploitables hors mode
-spectateur, tout ce qui suit se simplifie énormément.*
+**Phase 0 — faite, négative (2026-08-06).** `-writestats` (R3) testé en
+conditions réelles : aucun fichier écrit pour un match joué soi-même (voir
+§3.3). Route écartée, on passe directement aux phases suivantes.
 
 **Phase 1 — HUD (R1), découpée en deux (voir §3.1.1a).**
 
@@ -508,15 +574,17 @@ spectateur, tout ce qui suit se simplifie énormément.*
   fiabilité sur un enregistrement de 10 minutes, on garde 1a seul (« a touché »
   sans montant) plutôt que d'afficher des dégâts faux.
 
-**Phase 2 — 1 à 2 jours + RE. Replays (R2).** Finir le parsing 10.09 (§3.2),
-décoder le bitmap d'inputs par corrélation avec `SessionLog`, écran de débrief
-post-match. Bonus immédiat : validation empirique des ~90 combos préréglés.
-*Critère d'abandon* : si le format se révèle plus retors que prévu (> 2 jours
-de RE), on garde uniquement l'en-tête (légende, map, durée, KO), déjà lisible.
+**Phase 2 — abandonnée (2026-08-06). Replays (R2).** Format en grande partie
+décodé (voir §3.2), mais **testé et invalidé sur le fond** : le fichier
+`.replay` ne s'écrit que pour un match avec fin de partie, jamais pour une
+session de salle d'entraînement — l'usage réel de l'app. Continuer la RE
+n'aurait rien changé à ce constat. Reste utilisable un jour, hors périmètre
+de ce document, si l'app gagnait un usage centré sur l'analyse de vrais
+matchs plutôt que sur le drill de combos — pas prévu actuellement.
 
-**Phase 3 — conditionnelle. Vision fine (R4).** Uniquement si, après les
-phases 1 et 2, il reste un besoin **formulé** que ni le HUD ni les replays ne
-couvrent. Commencer par le sous-problème **le plus rentable et le plus simple** :
+**Phase 3 — conditionnelle. Vision fine (R4).** Uniquement si, après la
+phase 1, il reste un besoin **formulé** que le HUD ne couvre pas. Commencer
+par le sous-problème **le plus rentable et le plus simple** :
 **au sol / en l'air**, un classifieur binaire sur une petite ROI autour du
 personnage — pas les 30 moves d'un coup.
 *Critère d'abandon* : si le binaire sol/air ne dépasse pas ~90 % en conditions

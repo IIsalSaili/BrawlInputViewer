@@ -219,6 +219,21 @@ public partial class MainWindow : Window
     private DateTime _lastInputTime = DateTime.UtcNow;
     private bool _autoHidden;
 
+    // --- Vision (phase 1, docs/plan_improve_combo.md) : les instances vivent dans AppState
+    // (voir AppState.HudDamageSource/HudTierSource), MainWindow ne fait que les démarrer/arrêter
+    // selon les réglages et réagir à leurs événements.
+    private (bool Enabled, int X, int Y, int W, int H) _lastAppliedHudSettings;
+    private (bool Enabled, int X, int Y, int W, int H) _lastAppliedHudTierSettings;
+
+    // Indicateurs permanents en direct (à gauche de l'écran, pas juste un toast ponctuel) :
+    // demande explicite de l'utilisateur — un panneau de contrôle séparé du jeu ne permet pas
+    // de vérifier le calibrage/la lecture pendant qu'on joue réellement. Visibles seulement
+    // quand la source correspondante tourne (voir ApplyHudDetectionSettings/ApplyHudTierSettings).
+    private Border _hudTierSwatchOverlay = null!;
+    private TextBlock _hudTierIndicatorText = null!;
+    private TextBlock _hudHitIndicatorText = null!;
+    private StackPanel _hudTierIndicatorPanel = null!;
+
     // --- Enregistrement de combo (Ctrl+Alt+R) ---
     private readonly List<(List<KeyBind> Binds, DateTime Time)> _recordedMoves = new();
 
@@ -332,6 +347,36 @@ public partial class MainWindow : Window
         Canvas.SetTop(_suspendedBadge, 40);
         RootCanvas.Children.Add(_suspendedBadge);
         AppState.CaptureSuspendedChanged += OnCaptureSuspendedChanged;
+
+        _hudTierSwatchOverlay = new Border { Width = 14, Height = 14, Margin = new Thickness(0, 0, 6, 0), BorderBrush = Brushes.White, BorderThickness = new Thickness(1), Background = Brushes.Transparent };
+        _hudTierIndicatorText = new TextBlock { Foreground = Brushes.White, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+        _hudTierIndicatorPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Background = new SolidColorBrush(Color.FromArgb(0xB0, 0x00, 0x00, 0x00)),
+            Visibility = Visibility.Collapsed,
+        };
+        _hudTierIndicatorPanel.Children.Add(_hudTierSwatchOverlay);
+        _hudTierIndicatorPanel.Children.Add(_hudTierIndicatorText);
+        var hudTierIndicatorPadding = new Border { Padding = new Thickness(6, 4, 8, 4), Child = _hudTierIndicatorPanel };
+        Canvas.SetLeft(hudTierIndicatorPadding, 10);
+        Canvas.SetTop(hudTierIndicatorPadding, 90);
+        RootCanvas.Children.Add(hudTierIndicatorPadding);
+
+        _hudHitIndicatorText = new TextBlock
+        {
+            Foreground = Brushes.White,
+            FontSize = 12,
+            Background = new SolidColorBrush(Color.FromArgb(0xB0, 0x00, 0x00, 0x00)),
+            Padding = new Thickness(6, 4, 8, 4),
+            Visibility = Visibility.Collapsed,
+        };
+        Canvas.SetLeft(_hudHitIndicatorText, 10);
+        Canvas.SetTop(_hudHitIndicatorText, 116);
+        RootCanvas.Children.Add(_hudHitIndicatorText);
+
+        AppState.HudTierSource.Sampled += OnHudTierSampled;
+        AppState.HudDamageSource.Sampled += OnHudRatioSampled;
 
         ApplyScale();
         SetActiveComboRunner();
@@ -930,6 +975,7 @@ public partial class MainWindow : Window
 
     private void UpdateComboStepVisuals()
     {
+        UpdateHudSensitivityForCurrentStep();
         if (_comboRunner is null) return;
 
         foreach (var child in _comboStepsPanel.Children)
@@ -1330,6 +1376,12 @@ public partial class MainWindow : Window
         _autoHideCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _autoHideCheckTimer.Tick += (_, _) => CheckAutoHideIdle();
         _autoHideCheckTimer.Start();
+
+        AppState.HudDamageSource.HitDetected += OnHudHitDetected;
+        ApplyHudDetectionSettings();
+
+        AppState.HudTierSource.TierChanged += OnHudTierChanged;
+        ApplyHudTierSettings();
 
         AppState.Hook.KeyDown += OnGlobalKeyDown;
         AppState.Hook.KeyUp += OnGlobalKeyUp;
@@ -1839,7 +1891,116 @@ public partial class MainWindow : Window
             UpdateLegendPortrait();
             var idx = AppState.ActiveComboIndex;
             if (idx >= 0 && idx < AppState.Combos.Count) UpdateDexRequirement(AppState.Combos[idx]);
+
+            ApplyHudDetectionSettings();
+            ApplyHudTierSettings();
         });
+    }
+
+    /// <summary>(Re)démarre ou arrête HudDamageSource si l'activation ou la zone calibrée ont
+    /// changé depuis le dernier appel — appelé au chargement et à chaque changement de réglages
+    /// plutôt que de redémarrer le timer à chaque frappe de curseur dans un champ sans rapport.</summary>
+    private void ApplyHudDetectionSettings()
+    {
+        var s = AppState.Settings;
+        var shouldRun = s.HudDetectionEnabled && s.HudRoiCalibrated && s.HudRoiWidth > 0 && s.HudRoiHeight > 0;
+        var desired = (shouldRun, s.HudRoiX, s.HudRoiY, s.HudRoiWidth, s.HudRoiHeight);
+        if (desired == _lastAppliedHudSettings) return;
+        _lastAppliedHudSettings = desired;
+
+        if (shouldRun)
+        {
+            AppState.HudDamageSource.Start(s.HudRoiX, s.HudRoiY, s.HudRoiWidth, s.HudRoiHeight);
+            _hudHitIndicatorText.Text = "Détection de hit : en attente…";
+        }
+        else
+        {
+            AppState.HudDamageSource.Stop();
+        }
+        _hudHitIndicatorText.Visibility = shouldRun ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Retour permanent en direct (voir champs _hudTierIndicatorPanel/_hudHitIndicatorText) :
+    /// levé à CHAQUE capture (pas débounced comme HitDetected/TierChanged), donc bien plus
+    /// bavard — c'est le but, l'utilisateur veut voir la lecture bouger en temps réel pendant
+    /// qu'il joue plutôt que d'attendre un déclenchement ponctuel.</summary>
+    private void OnHudRatioSampled(double ratio)
+    {
+        Dispatcher.Invoke(() => _hudHitIndicatorText.Text = $"Détection de hit : {ratio * 100:0.0} % changé");
+    }
+
+    private void OnHudTierSampled((int R, int G, int B, DamageTier? HueHint) sample)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            // Le carré affiche la couleur brute captée (utile pour vérifier que le calibrage
+            // vise la bonne zone), mais le texte fait foi sur AppState.HudTierSource.CurrentTier
+            // (l'état de la machine à états, voir HudDamageTierSource) — pas sur la
+            // classification par teinte de ce seul échantillon, qui n'est qu'un indice
+            // diagnostique et n'a plus besoin d'être exacte pour que la détection fonctionne.
+            _hudTierSwatchOverlay.Background = new SolidColorBrush(Color.FromRgb((byte)sample.R, (byte)sample.G, (byte)sample.B));
+            var hueNote = sample.HueHint is { } h ? HudTierLabel(h) : "indice teinte : non concluant";
+            _hudTierIndicatorText.Text = $"{HudTierLabel(AppState.HudTierSource.CurrentTier)}  ({hueNote})";
+        });
+    }
+
+    /// <summary>Signal purement additif (voir docs/plan_improve_combo.md §6) : n'affecte jamais
+    /// ComboRunner, se contente d'un badge informatif. Aucune tentative de corréler avec l'étape
+    /// de combo en cours pour l'instant (phase 1a) — juste "quelque chose a changé dans la zone
+    /// surveillée".</summary>
+    private void OnHudHitDetected()
+    {
+        Dispatcher.Invoke(() => ShowToast("✔ changement détecté (zone HUD)"));
+    }
+
+    /// <summary>(Re)démarre ou arrête HudDamageTierSource selon les mêmes règles
+    /// qu'ApplyHudDetectionSettings, source de signal indépendante.</summary>
+    private void ApplyHudTierSettings()
+    {
+        var s = AppState.Settings;
+        var shouldRun = s.HudTierDetectionEnabled && s.HudTierRoiCalibrated && s.HudTierRoiWidth > 0 && s.HudTierRoiHeight > 0;
+        var desired = (shouldRun, s.HudTierRoiX, s.HudTierRoiY, s.HudTierRoiWidth, s.HudTierRoiHeight);
+        if (desired == _lastAppliedHudTierSettings) return;
+        _lastAppliedHudTierSettings = desired;
+
+        if (shouldRun)
+        {
+            AppState.HudTierSource.Start(s.HudTierRoiX, s.HudTierRoiY, s.HudTierRoiWidth, s.HudTierRoiHeight);
+            _hudTierIndicatorText.Text = "en attente…";
+        }
+        else
+        {
+            AppState.HudTierSource.Stop();
+        }
+        _hudTierIndicatorPanel.Visibility = shouldRun ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static string HudTierLabel(DamageTier tier) => tier switch
+    {
+        DamageTier.White => "Blanc (0-49%)",
+        DamageTier.Yellow => "Jaune (50-99%)",
+        DamageTier.Orange => "Orange (100-149%)",
+        DamageTier.Red => "Rouge (150-199%)",
+        DamageTier.Black => "Noir (200%+)",
+        _ => tier.ToString(),
+    };
+
+    private void OnHudTierChanged(DamageTier tier)
+    {
+        Dispatcher.Invoke(() => ShowToast($"Palier de dégâts adverse : {HudTierLabel(tier)}"));
+    }
+
+    /// <summary>Active le seuil de détection sensible (plus de faux positifs possibles) tant que
+    /// l'étape de combo en cours exige "Lancer" — un lancement d'arme fait souvent trop peu de
+    /// dégâts pour passer le seuil normal, voir HudDamageSource.BoostedChangedPixelRatioThreshold.
+    /// Appelé depuis UpdateComboStepVisuals, donc recalculé à chaque changement d'étape/de combo.</summary>
+    private void UpdateHudSensitivityForCurrentStep()
+    {
+        var steps = _comboRunner?.Combo.Steps;
+        var index = _comboRunner?.CurrentStepIndex ?? -1;
+        var requiresLancer = steps is not null && index >= 0 && index < steps.Count
+            && steps[index].RequiredActions.Contains("Lancer");
+        AppState.HudDamageSource.SetBoostedSensitivity(requiresLancer);
     }
 
     private void ApplyClickThrough(bool clickThrough)

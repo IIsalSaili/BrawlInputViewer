@@ -86,4 +86,41 @@ public sealed class OverlaySettings
     /// défaut (comportement historique inchangé si l'utilisateur n'active rien).</summary>
     public bool AutoHideEnabled { get; set; }
     public int AutoHideIdleSeconds { get; set; } = 6;
+
+    /// <summary>Détection de hit par lecture d'écran (phase 1a de docs/plan_improve_combo.md) :
+    /// capture périodique d'une petite zone du HUD (dégâts adverses) et détection d'un
+    /// changement de pixels, sans OCR — juste "un hit a probablement eu lieu", jamais un montant.
+    /// Purement additif à ComboRunner (voir Core/Vision/HudDamageSource.cs) : ne fait jamais
+    /// échouer ni valider une étape, affiche seulement un badge informatif. Désactivé par défaut
+    /// et nécessite un calibrage explicite (HudRoiCalibrated) avant de pouvoir s'activer.</summary>
+    public bool HudDetectionEnabled { get; set; }
+
+    /// <summary>Vrai une fois que l'utilisateur a dessiné la zone à surveiller (voir
+    /// Windows/HudCalibrationWindow). Tant que c'est faux, HudDetectionEnabled ne doit
+    /// avoir aucun effet — pas de zone valide à capturer.</summary>
+    public bool HudRoiCalibrated { get; set; }
+
+    /// <summary>Rectangle de capture en pixels physiques d'écran (coordonnées de
+    /// System.Windows.Forms.Screen, PAS en unités WPF) — la capture GDI
+    /// (System.Drawing.Graphics.CopyFromScreen) travaille nativement dans cet espace, donc
+    /// aucune conversion DPI n'est nécessaire côté Core/Vision. Défini par
+    /// HudCalibrationWindow.</summary>
+    public int HudRoiX { get; set; }
+    public int HudRoiY { get; set; }
+    public int HudRoiWidth { get; set; }
+    public int HudRoiHeight { get; set; }
+
+    /// <summary>Palier de dégâts par couleur (phase 1b, docs/plan_improve_combo.md §3.1.1) :
+    /// contrairement à HudRoiX/Y/Width/Height (diff de pixels sur le nombre de dégâts, nécessite
+    /// l'option "Nombre de dégâts" activée en jeu), celle-ci lit la couleur de la barre sous
+    /// l'icône adverse (toujours visible, aucun réglage de jeu requis) et la classe en
+    /// Blanc/Jaune/Orange/Rouge/Noir — les 5 paliers officiels du jeu (0/50/100/150/200%).
+    /// Bien plus simple qu'un OCR de chiffres : une couleur moyenne + une classification par
+    /// teinte, pas de gabarit à fabriquer.</summary>
+    public bool HudTierDetectionEnabled { get; set; }
+    public bool HudTierRoiCalibrated { get; set; }
+    public int HudTierRoiX { get; set; }
+    public int HudTierRoiY { get; set; }
+    public int HudTierRoiWidth { get; set; }
+    public int HudTierRoiHeight { get; set; }
 }
