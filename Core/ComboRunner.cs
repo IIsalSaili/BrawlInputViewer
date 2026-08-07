@@ -56,31 +56,68 @@ public enum ComboFailReason
 ///   des deux côtés de la comparaison dès qu'une verticale est présente (voir
 ///   NormalizeMovement) : une horizontale tenue en plus d'un Bas/Haut requis
 ///   n'est plus un excédent fautif en Strict, puisqu'elle ne sort pas en jeu.
-/// - Gauche/Droite d'un combo sont symétriques : la 1ère fois qu'une étape
-///   exige une direction gauche/droite alors que le joueur presse l'opposée
-///   (et que le reste de l'étape correspond), toute la tentative en cours
-///   bascule en "miroir" (_mirroredDirections) — attendre l'opposé de ce que
-///   Combo.Steps décrit pour Gauche/Droite jusqu'à la fin de la tentative. Une
-///   combo pensée "vers la droite" doit donc marcher identiquement jouée
-///   "vers la gauche" sans avoir à la dupliquer. Haut/Bas ne sont jamais
-///   inversés (l'orientation gauche/droite du joueur ne les affecte pas).
-///   Verrouillé une seule fois par tentative (voir UpdateMirrorLock), remis à
-///   zéro à chaque retour à l'étape 0 (échec, abandon, ou succès complet).
+/// - Gauche/Droite d'un combo sont totalement interchangeables, à chaque
+///   étape indépendamment (retour utilisateur explicite : "gauche et droite
+///   ça revient au même", pas de notion de "sens du combo" à respecter). Une
+///   étape qui exige Gauche accepte aussi bien Gauche que Droite, et
+///   inversement — CanonicalizeHorizontal fusionne les deux en un seul jeton
+///   avant toute comparaison, des deux côtés (requis et pressé). Pas de
+///   mémoire d'une étape à l'autre ni sur la tentative (contrairement à
+///   l'ancien mécanisme de verrouillage par tentative, abandonné : il
+///   pouvait laisser l'affichage désynchronisé de ce que le joueur venait
+///   de jouer). Haut/Bas ne sont jamais concernés par cette fusion.
+/// - Hit confirmé (RequireHitConfirmation, voir docstring dédié plus bas) :
+///   couche orthogonale à tout ce qui précède, greffée sur chaque étape
+///   d'attaque — n'affecte jamais l'avancement étape par étape ci-dessus
+///   (les pastilles restent instantanées), mais peut invalider toute la
+///   tentative en cours dès qu'un hit attendu n'arrive pas à temps.
 ///
 /// No UI, no keyboard hook — testable independently.
 /// </summary>
 public sealed class ComboRunner
 {
+    /// <summary>Actions qui infligent des dégâts à l'adversaire — mêmes noms déjà en dur
+    /// dans MainWindow.UpdateHudSensitivityForCurrentStep. Détermine quelles étapes
+    /// attendent un hit HUD confirmé, voir RequireHitConfirmation.</summary>
+    private static readonly HashSet<string> DamagingActions = new() { "Att. légère", "Att. forte", "Lancer" };
+
     public Combo Combo { get; }
     public int CurrentStepIndex { get; private set; }
     public ComboRunState State { get; private set; } = ComboRunState.Waiting;
 
+    /// <summary>Si vrai, chaque étape d'attaque réussie (bonnes touches) attend un hit HUD
+    /// confirmé (voir ConfirmHit) dans une fenêtre courte (HitConfirmationWindow) — piloté
+    /// par MainWindow depuis AppState.Settings.HudDetectionEnabled/HudRoiCalibrated. Par
+    /// défaut faux : aucun changement de comportement tant que la détection de hit n'est
+    /// pas calibrée. Vérifie dès la 1ère étape d'attaque, pas seulement à la fin du combo :
+    /// un premier coup joué dans le vide invalide la tentative tout de suite, plutôt que de
+    /// laisser le joueur continuer un combo déjà mort jusqu'à la dernière étape.</summary>
+    public bool RequireHitConfirmation { get; set; }
+
+    /// <summary>Hits HUD encore attendus pour la tentative en cours, un par étape d'attaque
+    /// réussie (FIFO) — voir Feed (enqueue), ConfirmHit (dequeue sur confirmation),
+    /// CheckHitConfirmationTimeout (échec si le plus ancien expire sans être confirmé).</summary>
+    private readonly Queue<DateTime> _pendingHitDeadlines = new();
+
+    /// <summary>Vrai si la dernière étape du combo a réussi mais attend encore que
+    /// _pendingHitDeadlines se vide avant d'annoncer ComboCompleted/Streak++.</summary>
+    private bool _awaitingFinalConfirmation;
+
+    // Historique de ce nombre (même jour) : 900ms (trop lent, vérifié seulement en fin de
+    // combo) → 400ms → 250ms (demandé explicitement par l'utilisateur, "encore trop lent") →
+    // **remonté à 600ms** après test réel : à 250ms, de vrais coups qui touchaient bel et
+    // bien étaient invalidés avant même que le HUD ait eu le temps de refléter le hit (temps
+    // de trajet de l'attaque + latence de detection), cassant la tentative en cours en plein
+    // milieu — et au passage, ce reset prématuré remettait aussi l'orientation miroir à zéro
+    // (ResetMirrorState), ce qui donnait l'impression que "la flèche changeait de sens" toute
+    // seule alors que le joueur continuait de jouer correctement. Ne pas redescendre sous ce
+    // seuil sans un vrai test en jeu qui le justifie. Voir aussi HudDamageSource.DebounceMs :
+    // avec la file FIFO ci-dessus, un HitDetected en trop (rien à confirmer) est
+    // silencieusement ignoré, donc le debounce court n'a pas besoin de remonter avec ceci.
+    private static readonly TimeSpan HitConfirmationWindow = TimeSpan.FromMilliseconds(600);
+
     /// <summary>Number of consecutive full-combo completions since the last failure.</summary>
     public int Streak { get; private set; }
-
-    /// <summary>True si cette tentative a été détectée comme jouée en miroir
-    /// (Gauche/Droite inversés par rapport à Combo.Steps) — voir docstring de classe.</summary>
-    public bool IsMirrored => _mirroredDirections == true;
 
     public event Action<int>? StepSucceeded;
     public event Action<int, ComboFailReason>? StepFailed;
@@ -88,11 +125,15 @@ public sealed class ComboRunner
     public event Action? ComboReset;
     public event Action? ComboAbandoned;
 
-    /// <summary>Levé chaque fois que IsMirrored est (re)déterminé : passage à true dès
-    /// qu'une direction opposée est détectée, et repassage à false à chaque retour à
-    /// l'étape 0 (échec/abandon/succès) pour que l'UI désinverse ses flèches avant la
-    /// tentative suivante. Sert à l'UI pour inverser l'affichage des flèches de direction.</summary>
-    public event Action<bool>? MirrorChanged;
+    /// <summary>Levé quand les bonnes touches ont toutes été jouées mais qu'il manque encore
+    /// des hits HUD confirmés pour finaliser (voir RequireHitConfirmation) — permet à l'UI de
+    /// distinguer "en attente" d'un vrai ComboCompleted silencieux.</summary>
+    public event Action? ComboAwaitingHitConfirmation;
+
+    /// <summary>Levé quand la fenêtre d'attente (HitConfirmationWindow) expire sans assez de
+    /// hits confirmés : la tentative, pourtant jouée avec les bonnes touches, est invalidée
+    /// (Streak remis à zéro sauf KeepStreakOnFail).</summary>
+    public event Action? HitNotConfirmed;
 
     /// <summary>Dernier instant où Feed a été appelé — sert uniquement à
     /// CheckAbandon (voir plus bas), pas à juger une étape.</summary>
@@ -102,10 +143,6 @@ public sealed class ComboRunner
     /// Sert uniquement à tolérer un mash/répétition du même bouton juste après (voir
     /// docstring de classe) — pas une histoire de délai, juste un état mémorisé.</summary>
     private HashSet<string> _lastConsumedActionKeys = new();
-
-    /// <summary>Null tant que l'orientation n'a pas encore été déterminée pour la
-    /// tentative en cours ; true/false une fois verrouillée (voir docstring de classe).</summary>
-    private bool? _mirroredDirections;
 
     /// <summary>If true, a failed combo keeps its Streak instead of resetting to 0.</summary>
     public bool KeepStreakOnFail { get; set; }
@@ -134,15 +171,10 @@ public sealed class ComboRunner
             .Where(b => b.Group != "Movement").Select(b => b.Action));
 
         var (requiredMovementNames, requiredAction) = SplitByMovement(required, pressedBindsThisTick);
-        requiredMovementNames = NormalizeMovement(requiredMovementNames);
+        requiredMovementNames = CanonicalizeHorizontal(NormalizeMovement(requiredMovementNames));
+        pressedMovement = CanonicalizeHorizontal(pressedMovement);
 
-        // Verrouille (une seule fois par tentative) si cette étape se joue en miroir —
-        // voir docstring de classe. Doit tourner avant toute comparaison de mouvement
-        // ci-dessous pour que l'étape courante valide déjà avec l'orientation détectée.
-        UpdateMirrorLock(requiredMovementNames, pressedMovement);
-        var effectiveRequiredMovement = _mirroredDirections == true
-            ? MirrorMovementNames(requiredMovementNames)
-            : requiredMovementNames;
+        var effectiveRequiredMovement = requiredMovementNames;
 
         bool movementOk = effectiveRequiredMovement.IsSubsetOf(pressedMovement);
 
@@ -179,17 +211,38 @@ public sealed class ComboRunner
             // qui vient de réussir comme "courante" et la repassait en noir — elle n'apparaissait
             // vraiment vert qu'au Feed suivant (décalage d'un input, signalé par l'utilisateur).
             var succeededIndex = CurrentStepIndex;
+            var stepWasDamaging = RequireHitConfirmation && requiredAction.Any(DamagingActions.Contains);
             CurrentStepIndex++;
             StepSucceeded?.Invoke(succeededIndex);
 
-            if (CurrentStepIndex >= Combo.Steps.Count)
+            var comboFinished = CurrentStepIndex >= Combo.Steps.Count;
+            if (comboFinished)
             {
                 State = ComboRunState.Success;
-                Streak++;
-                ComboCompleted?.Invoke();
                 CurrentStepIndex = 0;
                 State = ComboRunState.Waiting;
-                ResetMirrorState();
+            }
+
+            // Chaque étape d'attaque réussie attend son propre hit HUD (voir docstring de
+            // RequireHitConfirmation) — vérifié dès la 1ère étape, pas seulement à la fin.
+            if (stepWasDamaging) _pendingHitDeadlines.Enqueue(timestamp + HitConfirmationWindow);
+
+            if (comboFinished)
+            {
+                if (_pendingHitDeadlines.Count == 0)
+                {
+                    Streak++;
+                    ComboCompleted?.Invoke();
+                }
+                else
+                {
+                    // Le dernier coup du combo (ou un coup précédent) n'a pas encore été
+                    // confirmé — on attend que la file se vide (ConfirmHit) ou expire
+                    // (CheckHitConfirmationTimeout) avant d'annoncer une réussite qui n'a
+                    // peut-être pas eu lieu.
+                    _awaitingFinalConfirmation = true;
+                    ComboAwaitingHitConfirmation?.Invoke();
+                }
             }
 
             return;
@@ -221,7 +274,7 @@ public sealed class ComboRunner
             CurrentStepIndex = 0;
             State = ComboRunState.Waiting;
             _lastConsumedActionKeys = new HashSet<string>();
-            ResetMirrorState();
+            ClearPendingHitConfirmation();
             ComboReset?.Invoke();
             return;
         }
@@ -261,7 +314,7 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
-        ResetMirrorState();
+        ClearPendingHitConfirmation();
         ComboReset?.Invoke();
     }
 
@@ -291,59 +344,21 @@ public sealed class ComboRunner
         return result;
     }
 
-    /// <summary>Actions de direction qui ont un opposé gauche/droite (Haut/Bas ne sont
-    /// jamais inversés — l'orientation gauche/droite du joueur ne les affecte pas).</summary>
-    private static readonly Dictionary<string, string> DirectionOpposite = new()
+    /// <summary>Fusionne Gauche et Droite en un seul jeton ("Gauche", choisi arbitrairement
+    /// comme canonique) avant toute comparaison de mouvement — Gauche/Droite sont
+    /// interchangeables partout dans l'app (voir docstring de classe), donc plus besoin de
+    /// savoir laquelle des deux est réellement requise/pressée, seulement qu'une direction
+    /// horizontale l'est des deux côtés. Appliqué aux deux côtés de la comparaison (requis et
+    /// pressé), après NormalizeMovement (la priorité verticale doit avoir déjà retiré les
+    /// horizontales superflues avant cette fusion).</summary>
+    private static HashSet<string> CanonicalizeHorizontal(HashSet<string> movement)
     {
-        ["Gauche"] = "Droite",
-        ["Droite"] = "Gauche",
-    };
+        if (!movement.Contains("Droite")) return movement;
 
-    private static HashSet<string> MirrorMovementNames(HashSet<string> names)
-    {
-        var result = new HashSet<string>();
-        foreach (var n in names)
-        {
-            result.Add(DirectionOpposite.TryGetValue(n, out var opposite) ? opposite : n);
-        }
+        var result = new HashSet<string>(movement);
+        result.Remove("Droite");
+        result.Add("Gauche");
         return result;
-    }
-
-    /// <summary>Verrouille _mirroredDirections dès que le joueur presse l'opposé exact
-    /// d'une direction gauche/droite requise (et rien qu'elle) — une seule fois par
-    /// tentative, voir docstring de classe. Ne fait rien tant que l'étape en cours ne
-    /// requiert aucune direction gauche/droite (Haut/Bas seuls ne peuvent pas déterminer
-    /// l'orientation) ou si l'orientation est déjà verrouillée.</summary>
-    private void UpdateMirrorLock(HashSet<string> requiredMovementNames, HashSet<string> pressedMovement)
-    {
-        if (_mirroredDirections.HasValue) return;
-        if (!requiredMovementNames.Any(n => DirectionOpposite.ContainsKey(n))) return;
-
-        var mirrored = MirrorMovementNames(requiredMovementNames);
-        bool matchesNormal = requiredMovementNames.IsSubsetOf(pressedMovement);
-        bool matchesMirrored = mirrored.IsSubsetOf(pressedMovement);
-
-        if (matchesMirrored && !matchesNormal)
-        {
-            _mirroredDirections = true;
-            MirrorChanged?.Invoke(true);
-        }
-        else if (matchesNormal)
-        {
-            _mirroredDirections = false;
-        }
-        // Sinon : encore en train de construire l'étape (aucune des deux orientations
-        // n'est encore confirmée), on retente au prochain Feed.
-    }
-
-    /// <summary>Remet l'orientation à "non déterminée" pour la prochaine tentative, et
-    /// notifie l'UI si elle affichait des flèches inversées, pour qu'elle redevienne
-    /// normale avant que la tentative suivante ne (re)détecte une éventuelle inversion.</summary>
-    private void ResetMirrorState()
-    {
-        var wasMirrored = _mirroredDirections == true;
-        _mirroredDirections = null;
-        if (wasMirrored) MirrorChanged?.Invoke(false);
     }
 
     /// <summary>Sépare un ensemble d'actions requises en (directions, boutons d'action),
@@ -371,7 +386,7 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
-        ResetMirrorState();
+        ClearPendingHitConfirmation();
     }
 
     /// <summary>Appelé périodiquement (polling, pas à chaque input) pour abandonner
@@ -389,7 +404,61 @@ public sealed class ComboRunner
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
         _lastConsumedActionKeys = new HashSet<string>();
-        ResetMirrorState();
+        ClearPendingHitConfirmation();
         ComboAbandoned?.Invoke();
+    }
+
+    /// <summary>Purge la file de hits attendus et l'attente de finalisation — appelé partout
+    /// où la tentative en cours est abandonnée (échec, abandon, reset manuel) : les hits
+    /// encore attendus pour cette tentative morte n'ont plus de sens à confirmer.</summary>
+    private void ClearPendingHitConfirmation()
+    {
+        _pendingHitDeadlines.Clear();
+        _awaitingFinalConfirmation = false;
+    }
+
+    /// <summary>Appelé quand HudDamageSource détecte un hit (voir MainWindow.OnHudHitDetected) :
+    /// confirme le plus ancien hit encore attendu (FIFO), qu'il s'agisse d'une étape déjà
+    /// dépassée mid-combo ou de la finalisation du combo. Un hit sans rien à confirmer (file
+    /// vide) est silencieusement ignoré — le signal HUD ne sait pas distinguer la source des
+    /// dégâts, un hit "en trop" (ex. debounce court, plusieurs frames d'une même animation)
+    /// n'est pas une erreur.</summary>
+    public void ConfirmHit(DateTime now)
+    {
+        if (_pendingHitDeadlines.Count == 0) return;
+
+        _pendingHitDeadlines.Dequeue();
+
+        if (_awaitingFinalConfirmation && _pendingHitDeadlines.Count == 0)
+        {
+            _awaitingFinalConfirmation = false;
+            Streak++;
+            ComboCompleted?.Invoke();
+        }
+    }
+
+    /// <summary>Polling fréquent (voir MainWindow, timer dédié) : si le plus ancien hit encore
+    /// attendu dépasse sa fenêtre (HitConfirmationWindow) sans être confirmé, toute la
+    /// tentative en cours est invalidée tout de suite — y compris si le joueur est déjà allé
+    /// plus loin dans le combo (un coup qui a raté au milieu casse la tentative, continuer à
+    /// taper les étapes suivantes ne peut plus la sauver). Voir docstring de
+    /// RequireHitConfirmation : vérifié dès la 1ère étape d'attaque, pas seulement en fin de
+    /// combo.</summary>
+    public void CheckHitConfirmationTimeout(DateTime now)
+    {
+        if (_pendingHitDeadlines.Count == 0) return;
+        if (now <= _pendingHitDeadlines.Peek()) return;
+
+        ClearPendingHitConfirmation();
+        if (!KeepStreakOnFail) Streak = 0;
+
+        if (CurrentStepIndex > 0)
+        {
+            CurrentStepIndex = 0;
+            State = ComboRunState.Waiting;
+            _lastConsumedActionKeys = new HashSet<string>();
+        }
+
+        HitNotConfirmed?.Invoke();
     }
 }

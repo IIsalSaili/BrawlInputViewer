@@ -127,10 +127,6 @@ public partial class MainWindow : Window
     // Images dont la variante de couleur (noir=défaut, vert=réussie, rouge=échec)
     // doit suivre l'état de la pastille — voir ActionIconBaseNames/SetPillIconVariant.
     private readonly Dictionary<int, List<System.Windows.Shapes.Path>> _pillIconImagesByIndex = new();
-    // Icônes Gauche/Droite d'une pastille (avec le nom de l'action tel qu'écrit dans
-    // le combo) : seules celles-ci sont retournées quand ComboRunner détecte un combo
-    // joué en miroir (voir ComboRunner.MirrorChanged) — Haut/Bas n'y figurent jamais.
-    private readonly Dictionary<int, List<(string Action, System.Windows.Shapes.Path Shape)>> _directionIconsByIndex = new();
     private readonly Dictionary<int, ProgressBar> _pillBarsByIndex = new();
     private readonly Dictionary<int, TextBlock> _pillCountdownsByIndex = new();
 
@@ -194,15 +190,18 @@ public partial class MainWindow : Window
     // recoloré en accent doré de la marque plutôt qu'en noir — un remplissage noir
     // plein était quasi invisible sur le panneau bleu-nuit translucide réel du mode
     // Tutoriel (bug de contraste relevé en même temps que ce changement de pack,
-    // voir docs/audit_features.md). "green" = étape réussie, "red" = flash d'échec.
+    // voir docs/audit_features.md). "green" = étape réussie, "red" = flash d'échec,
+    // "orange" = bonnes touches mais hit HUD non confirmé (voir ComboRunner.HitNotConfirmed).
     private static readonly SolidColorBrush IconBrushDefault = new((Color)ColorConverter.ConvertFromString("#E8C44A"));
     private static readonly SolidColorBrush IconBrushSuccess = new((Color)ColorConverter.ConvertFromString("#55D98B"));
     private static readonly SolidColorBrush IconBrushFail = new((Color)ColorConverter.ConvertFromString("#E4574C"));
+    private static readonly SolidColorBrush IconBrushHitPending = new((Color)ColorConverter.ConvertFromString("#F0A030"));
 
     private static Brush IconBrushForVariant(string variant) => variant switch
     {
         "green" => IconBrushSuccess,
         "red" => IconBrushFail,
+        "orange" => IconBrushHitPending,
         _ => IconBrushDefault,
     };
 
@@ -213,6 +212,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _comboCompletedResetTimer;
     private DispatcherTimer? _comboAbandonPollTimer;
     private static readonly TimeSpan ComboAbandonTimeout = TimeSpan.FromSeconds(3);
+    private DispatcherTimer? _hitConfirmationPollTimer;
 
     // --- Estompage après inactivité (voir docs/amelioration.md piste #8) ---
     private DispatcherTimer? _autoHideCheckTimer;
@@ -692,7 +692,6 @@ public partial class MainWindow : Window
         _pillContentByIndex.Clear();
         _pillMaskByIndex.Clear();
         _pillIconImagesByIndex.Clear();
-        _directionIconsByIndex.Clear();
         _pillBarsByIndex.Clear();
         _pillCountdownsByIndex.Clear();
         _quizRevealed = false;
@@ -787,15 +786,6 @@ public partial class MainWindow : Window
                         shape.RenderTransformOrigin = new Point(0.5, 0.5);
                         shape.RenderTransform = new RotateTransform(rotation);
                     }
-                    if (action is "Gauche" or "Droite")
-                    {
-                        if (!_directionIconsByIndex.TryGetValue(i, out var directionIcons))
-                        {
-                            directionIcons = new List<(string, System.Windows.Shapes.Path)>();
-                            _directionIconsByIndex[i] = directionIcons;
-                        }
-                        directionIcons.Add((action, shape));
-                    }
                     iconShapes.Add(shape);
                     contentPanel.Children.Add(shape);
                 }
@@ -871,45 +861,7 @@ public partial class MainWindow : Window
             _comboStepsPanel.Children.Add(stepColumn);
         }
 
-        ApplyMirrorDisplay(_comboRunner?.IsMirrored ?? false);
         UpdateComboStepVisuals();
-    }
-
-    /// <summary>Tourne les icônes Gauche/Droite du panneau de combo pour refléter
-    /// l'orientation détectée par ComboRunner (voir ComboRunner.MirrorChanged) : en
-    /// miroir, chaque pastille Gauche/Droite affiche la flèche opposée à celle écrite
-    /// dans Combo.Steps, pour montrer visuellement ce qui est réellement attendu
-    /// (pas ce que Combo.Steps décrit dans son sens d'origine).</summary>
-    private void ApplyMirrorDisplay(bool mirrored)
-    {
-        foreach (var icons in _directionIconsByIndex.Values)
-        {
-            foreach (var (action, shape) in icons)
-            {
-                var displayedAction = mirrored ? OppositeDirection(action) : action;
-                if (ActionIconRotationDegrees.TryGetValue(displayedAction, out var rotation)
-                    && shape.RenderTransform is RotateTransform rt)
-                {
-                    rt.Angle = rotation;
-                }
-            }
-        }
-    }
-
-    private static string OppositeDirection(string action) => action switch
-    {
-        "Gauche" => "Droite",
-        "Droite" => "Gauche",
-        _ => action,
-    };
-
-    private void OnComboMirrorChanged(bool mirrored)
-    {
-        Dispatcher.Invoke(() =>
-        {
-            ApplyMirrorDisplay(mirrored);
-            if (mirrored) ShowToast("Direction inversée détectée — combo joué en miroir");
-        });
     }
 
     private Grid? PillAt(int index)
@@ -1065,13 +1017,13 @@ public partial class MainWindow : Window
     private static readonly TimeSpan FailBlinkStep = TimeSpan.FromMilliseconds(110);
     private const int FailBlinkCount = 3;
 
-    // Sur un échec : toute la rangée clignote puis se réinitialise. Couleur
-    // différente selon la cause (mauvaise touche = rouge, trop lent = orange)
-    // pour un diagnostic immédiat sans devoir recouper avec l'historique.
-    private void FlashAllStepsRed(ComboFailReason reason)
+    // Sur un échec : toute la rangée clignote puis se réinitialise. "red" = mauvaise
+    // touche (OnComboStepFailed), "orange" = bonnes touches mais hit HUD non confirmé
+    // (OnComboHitNotConfirmed) — diagnostic immédiat sans devoir recouper avec l'historique.
+    private void FlashAllSteps(string variant)
     {
         HideAllToleranceBars();
-        SetAllPillIconVariant("red"); // pas de variante orange dédiée : Timeout n'est de toute façon jamais levé (voir ComboFailReason)
+        SetAllPillIconVariant(variant);
 
         foreach (var child in _comboStepsPanel.Children)
         {
@@ -1108,7 +1060,8 @@ public partial class MainWindow : Window
             _comboRunner.ComboCompleted -= OnComboCompleted;
             _comboRunner.ComboReset -= OnComboReset;
             _comboRunner.ComboAbandoned -= OnComboAbandoned;
-            _comboRunner.MirrorChanged -= OnComboMirrorChanged;
+            _comboRunner.ComboAwaitingHitConfirmation -= OnComboAwaitingHitConfirmation;
+            _comboRunner.HitNotConfirmed -= OnComboHitNotConfirmed;
         }
 
         var index = AppState.ActiveComboIndex;
@@ -1124,7 +1077,9 @@ public partial class MainWindow : Window
             _comboRunner.ComboCompleted += OnComboCompleted;
             _comboRunner.ComboReset += OnComboReset;
             _comboRunner.ComboAbandoned += OnComboAbandoned;
-            _comboRunner.MirrorChanged += OnComboMirrorChanged;
+            _comboRunner.ComboAwaitingHitConfirmation += OnComboAwaitingHitConfirmation;
+            _comboRunner.HitNotConfirmed += OnComboHitNotConfirmed;
+            _comboRunner.RequireHitConfirmation = ShouldRequireHitConfirmation();
         }
 
         RenderComboSteps();
@@ -1160,7 +1115,7 @@ public partial class MainWindow : Window
             AppState.RecordStepResult(actions, success: false);
 
             ExplainFirstComboFailIfNeeded(actions);
-            FlashAllStepsRed(reason);
+            FlashAllSteps("red");
         });
     }
 
@@ -1369,6 +1324,15 @@ public partial class MainWindow : Window
         _comboAbandonPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _comboAbandonPollTimer.Tick += (_, _) => _comboRunner?.CheckAbandon(DateTime.UtcNow, ComboAbandonTimeout);
         _comboAbandonPollTimer.Start();
+
+        // Poll dédié, plus fréquent que _comboAbandonPollTimer ci-dessus : la fenêtre de
+        // confirmation de hit (ComboRunner.HitConfirmationWindow) est volontairement très
+        // courte (250ms, resserrée deux fois sur retour utilisateur) — un poll plus lent
+        // grignoterait une bonne partie de cette fenêtre en délai de détection pur, en plus
+        // du délai déjà inhérent au polling HudDamageSource lui-même (60ms).
+        _hitConfirmationPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+        _hitConfirmationPollTimer.Tick += (_, _) => _comboRunner?.CheckHitConfirmationTimeout(DateTime.UtcNow);
+        _hitConfirmationPollTimer.Start();
 
         // Poll indépendant lui aussi (voir _comboAbandonPollTimer ci-dessus pour le même
         // raisonnement) : estompe le panneau après AutoHideIdleSeconds sans input, si activé
@@ -1902,9 +1866,10 @@ public partial class MainWindow : Window
     /// plutôt que de redémarrer le timer à chaque frappe de curseur dans un champ sans rapport.</summary>
     private void ApplyHudDetectionSettings()
     {
+        var shouldRun = ShouldRequireHitConfirmation();
         var s = AppState.Settings;
-        var shouldRun = s.HudDetectionEnabled && s.HudRoiCalibrated && s.HudRoiWidth > 0 && s.HudRoiHeight > 0;
         var desired = (shouldRun, s.HudRoiX, s.HudRoiY, s.HudRoiWidth, s.HudRoiHeight);
+        if (_comboRunner is not null) _comboRunner.RequireHitConfirmation = shouldRun;
         if (desired == _lastAppliedHudSettings) return;
         _lastAppliedHudSettings = desired;
 
@@ -1918,6 +1883,17 @@ public partial class MainWindow : Window
             AppState.HudDamageSource.Stop();
         }
         _hudHitIndicatorText.Visibility = shouldRun ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Réutilise directement le réglage existant "Détection de hit" (activé +
+    /// zone calibrée) comme interrupteur pour ComboRunner.RequireHitConfirmation — décision
+    /// explicite de l'utilisateur plutôt qu'un nouveau réglage dédié : dès que ce réglage est
+    /// actif, un combo entièrement joué n'est compté comme réussi que si le HUD confirme
+    /// autant de hits que d'étapes d'attaque (voir Core/ComboRunner.cs).</summary>
+    private static bool ShouldRequireHitConfirmation()
+    {
+        var s = AppState.Settings;
+        return s.HudDetectionEnabled && s.HudRoiCalibrated && s.HudRoiWidth > 0 && s.HudRoiHeight > 0;
     }
 
     /// <summary>Retour permanent en direct (voir champs _hudTierIndicatorPanel/_hudHitIndicatorText) :
@@ -1944,13 +1920,49 @@ public partial class MainWindow : Window
         });
     }
 
-    /// <summary>Signal purement additif (voir docs/plan_improve_combo.md §6) : n'affecte jamais
-    /// ComboRunner, se contente d'un badge informatif. Aucune tentative de corréler avec l'étape
-    /// de combo en cours pour l'instant (phase 1a) — juste "quelque chose a changé dans la zone
-    /// surveillée".</summary>
+    /// <summary>Badge informatif (toast) +, depuis le gate de hit confirmé (voir
+    /// Core/ComboRunner.cs), crédite ce hit à la tentative de combo en cours ou à une
+    /// finalisation en attente — ComboRunner.ConfirmHit décide seul quoi en faire (sans
+    /// effet si RequireHitConfirmation est faux ou si rien n'est en cours/en attente).</summary>
     private void OnHudHitDetected()
     {
-        Dispatcher.Invoke(() => ShowToast("✔ changement détecté (zone HUD)"));
+        Dispatcher.Invoke(() =>
+        {
+            _comboRunner?.ConfirmHit(DateTime.UtcNow);
+            ShowToast("✔ changement détecté (zone HUD)");
+        });
+    }
+
+    /// <summary>Les bonnes touches ont toutes été jouées mais le HUD n'a pas encore confirmé
+    /// assez de hits (voir ComboRunner.ComboAwaitingHitConfirmation) — les pastilles sont déjà
+    /// toutes vertes à ce stade, ce toast évite la confusion tant qu'aucun son/texte "combo
+    /// réussi" n'arrive.</summary>
+    private void OnComboAwaitingHitConfirmation()
+    {
+        Dispatcher.Invoke(() => ShowToast("En attente de confirmation du coup…"));
+    }
+
+    /// <summary>La fenêtre d'attente a expiré sans assez de hits confirmés (voir
+    /// ComboRunner.HitNotConfirmed) : les bonnes touches ont été jouées mais rien ne prouve
+    /// qu'elles aient touché l'adversaire — même bookkeeping que OnComboReset/OnComboAbandoned
+    /// (TotalAttempts, pas TotalCompletions), flash orange pour distinguer d'une mauvaise touche.</summary>
+    private void OnComboHitNotConfirmed()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (AppState.Settings.SoundEnabled) SystemSounds.Hand.Play();
+
+            ShowToast("Bonnes touches, mais l'adversaire n'a pas pris de dégâts — combo invalidé");
+            FlashAllSteps("orange");
+            _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
+
+            var combo = _comboRunner?.Combo;
+            if (combo is not null)
+            {
+                combo.TotalAttempts++;
+                AppState.SaveCombosQuiet();
+            }
+        });
     }
 
     /// <summary>(Re)démarre ou arrête HudDamageTierSource selon les mêmes règles

@@ -17,8 +17,20 @@ namespace BrawlhallaOverlay;
 /// </summary>
 public sealed class HudDamageSource : IDisposable
 {
-    private const int PollIntervalMs = 120; // ~8 Hz, largement suffisant pour une ROI de ce type
-    private const int DebounceMs = 400; // évite plusieurs déclenchements pour une même animation de dégâts qui s'anime sur plusieurs frames
+    // Abaissé de 120ms à 60ms (Version 24, retour utilisateur : encore trop lent) — ~16 Hz,
+    // toujours négligeable en CPU pour une ROI de cette taille. Chaque ms gagnée ici réduit
+    // d'autant le pire cas de latence de détection avant que ComboRunner.HitConfirmationWindow
+    // (voir Core/ComboRunner.cs) n'expire à tort sur un vrai hit qui a mis un peu de temps à
+    // s'afficher.
+    private const int PollIntervalMs = 60;
+
+    // Évite plusieurs déclenchements pour une même animation de dégâts qui s'anime sur
+    // plusieurs frames. Aligné sur PollIntervalMs (un seul poll de marge) plutôt qu'un delta
+    // arbitraire plus large : un debounce plus court peut laisser passer 2-3 événements pour
+    // l'animation d'un seul hit, mais ce n'est plus un problème depuis la Version 24 —
+    // ComboRunner.ConfirmHit ignore silencieusement un hit qui n'a rien à confirmer (file
+    // d'attente vide), donc un déclenchement "en trop" ne fait rien.
+    private const int DebounceMs = PollIntervalMs;
 
     // Fraction de pixels de la ROI qui doivent différer (au-delà d'une petite tolérance de
     // bruit vidéo) pour considérer que quelque chose a réellement changé. Premier test réel

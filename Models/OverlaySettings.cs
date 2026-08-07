@@ -90,25 +90,30 @@ public sealed class OverlaySettings
     /// <summary>Détection de hit par lecture d'écran (phase 1a de docs/plan_improve_combo.md) :
     /// capture périodique d'une petite zone du HUD (dégâts adverses) et détection d'un
     /// changement de pixels, sans OCR — juste "un hit a probablement eu lieu", jamais un montant.
-    /// Purement additif à ComboRunner (voir Core/Vision/HudDamageSource.cs) : ne fait jamais
-    /// échouer ni valider une étape, affiche seulement un badge informatif. Désactivé par défaut
-    /// et nécessite un calibrage explicite (HudRoiCalibrated) avant de pouvoir s'activer.</summary>
-    public bool HudDetectionEnabled { get; set; }
+    /// Depuis la Version 24 (voir CLAUDE.md), gate aussi ComboRunner.RequireHitConfirmation — ne
+    /// se contente plus d'un badge informatif, voir Core/ComboRunner.cs. Activé par défaut
+    /// (voir HudRoiX/Y/Width/Height ci-dessous) : plus la doctrine "désactivé tant que pas
+    /// calibré" d'origine, l'utilisateur a demandé de figer sa propre zone comme valeur par
+    /// défaut de l'app plutôt que de la recalibrer à chaque installation.</summary>
+    public bool HudDetectionEnabled { get; set; } = true;
 
-    /// <summary>Vrai une fois que l'utilisateur a dessiné la zone à surveiller (voir
-    /// Windows/HudCalibrationWindow). Tant que c'est faux, HudDetectionEnabled ne doit
-    /// avoir aucun effet — pas de zone valide à capturer.</summary>
-    public bool HudRoiCalibrated { get; set; }
+    /// <summary>Vrai une fois qu'une zone à surveiller existe (dessinée via
+    /// Windows/HudCalibrationWindow, ou — depuis la Version 24 — préremplie par défaut ci-dessous).
+    /// Tant que c'est faux, HudDetectionEnabled ne doit avoir aucun effet — pas de zone valide à
+    /// capturer.</summary>
+    public bool HudRoiCalibrated { get; set; } = true;
 
     /// <summary>Rectangle de capture en pixels physiques d'écran (coordonnées de
     /// System.Windows.Forms.Screen, PAS en unités WPF) — la capture GDI
     /// (System.Drawing.Graphics.CopyFromScreen) travaille nativement dans cet espace, donc
-    /// aucune conversion DPI n'est nécessaire côté Core/Vision. Défini par
-    /// HudCalibrationWindow.</summary>
-    public int HudRoiX { get; set; }
-    public int HudRoiY { get; set; }
-    public int HudRoiWidth { get; set; }
-    public int HudRoiHeight { get; set; }
+    /// aucune conversion DPI n'est nécessaire côté Core/Vision. Modifiable via
+    /// HudCalibrationWindow (ex. autre résolution/mise à l'échelle) ; les valeurs par défaut
+    /// ci-dessous sont celles calibrées personnellement par l'utilisateur (Version 24) — pas
+    /// garanties correctes sur une résolution différente, à recalibrer le cas échéant.</summary>
+    public int HudRoiX { get; set; } = 1318;
+    public int HudRoiY { get; set; } = 12;
+    public int HudRoiWidth { get; set; } = 42;
+    public int HudRoiHeight { get; set; } = 39;
 
     /// <summary>Palier de dégâts par couleur (phase 1b, docs/plan_improve_combo.md §3.1.1) :
     /// contrairement à HudRoiX/Y/Width/Height (diff de pixels sur le nombre de dégâts, nécessite
@@ -116,11 +121,12 @@ public sealed class OverlaySettings
     /// l'icône adverse (toujours visible, aucun réglage de jeu requis) et la classe en
     /// Blanc/Jaune/Orange/Rouge/Noir — les 5 paliers officiels du jeu (0/50/100/150/200%).
     /// Bien plus simple qu'un OCR de chiffres : une couleur moyenne + une classification par
-    /// teinte, pas de gabarit à fabriquer.</summary>
-    public bool HudTierDetectionEnabled { get; set; }
-    public bool HudTierRoiCalibrated { get; set; }
-    public int HudTierRoiX { get; set; }
-    public int HudTierRoiY { get; set; }
-    public int HudTierRoiWidth { get; set; }
-    public int HudTierRoiHeight { get; set; }
+    /// teinte, pas de gabarit à fabriquer. Activée par défaut depuis la Version 24, même
+    /// raisonnement que HudDetectionEnabled ci-dessus.</summary>
+    public bool HudTierDetectionEnabled { get; set; } = true;
+    public bool HudTierRoiCalibrated { get; set; } = true;
+    public int HudTierRoiX { get; set; } = 1310;
+    public int HudTierRoiY { get; set; } = 57;
+    public int HudTierRoiWidth { get; set; } = 36;
+    public int HudTierRoiHeight { get; set; } = 23;
 }
