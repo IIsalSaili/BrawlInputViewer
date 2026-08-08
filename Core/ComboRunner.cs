@@ -12,8 +12,10 @@ public enum ComboRunState
     Failed,
 }
 
-/// <summary>Why a step failed. Timeout is kept for backward-compat with saved combos/UI
-/// color-mapping but is never raised anymore — see the timing note on Feed below.</summary>
+/// <summary>Why a step failed. WrongInput = mauvaise touche (Feed). Timeout = plus de
+/// CheckMoveTimeout.MaxDelay écoulé depuis la dernière étape réussie (CheckMoveTimeout).
+/// L'UI rend réellement les deux différemment depuis l'audit 2026-08-07 (§M10) : rouge pour
+/// une mauvaise touche, bleu "trop lent" pour un timeout — voir MainWindow.OnComboStepFailed.</summary>
 public enum ComboFailReason
 {
     WrongInput,
@@ -24,32 +26,47 @@ public enum ComboFailReason
 /// Pure validation logic for a Combo: fed one "coup joué" (the set of KeyBind
 /// actions *currently held*, recomputed by the caller on every key change) at
 /// a time, tracks progress through the combo's steps, and resets on a wrong
-/// input. Aucune notion de timing nulle part dans ce moteur :
+/// input.
 ///
-/// - Timing (MinDelayMs/MaxDelayMs, Combo.DefaultToleranceMs) n'est jamais une
-///   condition d'échec — le vrai jeu n'exige aucun rythme précis pour qu'une
-///   combo touche. Ces champs ne servent qu'à la barre de tolérance visuelle.
-/// - Les touches de direction (Group == "Movement") tenues en plus de ce qui
-///   est demandé ne cassent une étape que si Combo.MatchMode == Strict — en
-///   IgnoreExtraneous (et c'était, par bug, aussi vrai en Strict avant ce
-///   correctif — voir docs/audit_features.md §1.1), un joueur réel garde
-///   souvent une direction enfoncée en enchaînant (ex. tenir Droite en
-///   sautant), ce n'est pas une faute. Les touches d'action (Group ==
-///   "Action") sont, elles, toujours jugées à l'identique quel que soit le
-///   MatchMode. ComboStep.FreeMovement tolère cet excédent de direction sur
-///   une étape précise même en Strict (ex. un coup qui demande de se décaler
-///   pour toucher la hitbox, sans que ce décalage fasse partie du combo).
-/// - Un mash/double-clic/chevauchement du bouton qui vient tout juste de
-///   valider l'étape précédente (ex. cliquer Saut 3 fois pour caler son
-///   timing, ou retaper la touche suivante avant d'avoir complètement
-///   relâché la précédente — le move est déjà lancé en jeu, retaper dessus
-///   ne fait rien) est ignoré au lieu de casser l'étape suivante : on ne
-///   fail que si le résidu inattendu contient autre chose que ce dernier
-///   bouton validé (IsSubsetOf, pas une égalité stricte).
-/// - Une étape qui demande "Saut" tolère toujours une direction tenue en plus
-///   (sauter en bougeant est normal en jeu), même en MatchMode.Strict et sans
-///   que ComboStep.FreeMovement soit coché — pas besoin de le configurer à la
-///   main pour chaque étape de saut, voir requiresJump ci-dessous.
+/// - Timing PAR ÉTAPE (MinDelayMs/MaxDelayMs, Combo.DefaultToleranceMs) n'est
+///   jamais une condition d'échec — le vrai jeu n'exige aucun rythme précis
+///   d'une étape à l'autre pour qu'un combo touche. Ces champs ne servent qu'à
+///   la barre de tolérance visuelle.
+/// - Délai maximum GLOBAL entre deux coups (CheckMoveTimeout, voir plus bas) :
+///   contrairement au timing par étape ci-dessus, demande explicite de
+///   l'utilisateur — au-delà de 2.5s sans qu'une étape n'avance, la tentative
+///   en cours est invalidée (StepFailed avec ComboFailReason.Timeout), même si
+///   le joueur arrive ensuite à reprendre le combo depuis le début. Ce n'est
+///   pas une histoire de rythme précis entre étapes voisines (ça, ça reste
+///   toléré), juste un plafond large pour couper une tentative clairement
+///   morte plutôt que de la laisser traîner indéfiniment.
+/// - "Les déplacements sont libres, une mauvaise attaque invalide" (règle
+///   formulée explicitement par l'utilisateur, corrigée le 2026-08-08). Deux
+///   moitiés à ne pas confondre :
+///   * ENTRE les coups, tout est libre : se déplacer, sauter, esquiver/dasher,
+///     même non demandé, ne casse jamais une tentative. Ça remplace l'ancienne
+///     distinction Combo.MatchMode (Strict/IgnoreExtraneous) et
+///     ComboStep.FreeMovement : les deux champs restent dans le modèle pour ne
+///     pas casser le schéma de combos.json existant, mais ne sont plus lus.
+///   * AU MOMENT de frapper, la direction fait partie du coup : nLight, sLight
+///     et dLight sont le MÊME bouton, seule la direction tenue change le move
+///     qui sort. Une étape qui frappe exige donc la direction EXACTE (SetEquals),
+///     pas "au moins ça" (IsSubsetOf). Sans ça, une étape nLight était validée
+///     par un dLight (le "Bas" en trop passant pour du mouvement libre), et
+///     réciproquement faire nLight quand l'étape demande dLight ne cassait rien
+///     — la différence ensembliste des boutons étant vide, l'entrée passait pour
+///     "étape en cours de construction" et était ignorée.
+///   Les étapes qui ne frappent pas (Saut, Esquive/Dash, direction seule) gardent
+///   la tolérance : une direction en plus n'y change réellement rien (sauter en
+///   bougeant est normal en jeu).
+/// - Un tick contenant une attaque ne signifie pas qu'un coup vient de sortir :
+///   il faut que ce soit l'attaque elle-même qui ait déclenché le tick (voir le
+///   paramètre triggeredBy de Feed). Ajouter une direction en gardant le bouton
+///   d'attaque enfoncé — typiquement la transition dLight → sLight, où on presse
+///   Droite avant d'avoir relâché Light — ne fait sortir aucun nouveau coup et
+///   reste donc transparent. C'est ce test qui a remplacé l'ancienne "tolérance
+///   de mash" (ignorer tout re-appui du bouton précédent), laquelle avalait
+///   justement le cas signalé ci-dessus.
 /// - Priorité verticale : en jeu, tenir Haut ou Bas en même temps qu'une
 ///   direction horizontale écrase cette dernière — tenir Gauche+Bas revient
 ///   exactement à tenir Bas. Les directions horizontales sont donc retirées
@@ -77,8 +94,11 @@ public enum ComboFailReason
 public sealed class ComboRunner
 {
     /// <summary>Actions qui infligent des dégâts à l'adversaire — mêmes noms déjà en dur
-    /// dans MainWindow.UpdateHudSensitivityForCurrentStep. Détermine quelles étapes
-    /// attendent un hit HUD confirmé, voir RequireHitConfirmation.</summary>
+    /// dans MainWindow.UpdateHudSensitivityForCurrentStep. Sert à deux choses : (1)
+    /// déterminer quelles étapes attendent un hit HUD confirmé (RequireHitConfirmation),
+    /// (2) déterminer, dans Feed, quels boutons pressés en trop peuvent casser une
+    /// tentative en cours — tout le reste (mouvement, Saut, Esquive/Dash) est toujours
+    /// toléré, voir le bullet dédié dans la docstring de classe.</summary>
     private static readonly HashSet<string> DamagingActions = new() { "Att. légère", "Att. forte", "Lancer" };
 
     public Combo Combo { get; }
@@ -94,13 +114,23 @@ public sealed class ComboRunner
     /// laisser le joueur continuer un combo déjà mort jusqu'à la dernière étape.</summary>
     public bool RequireHitConfirmation { get; set; }
 
-    /// <summary>Hits HUD encore attendus pour la tentative en cours, un par étape d'attaque
+    /// <summary>Hits HUD encore attendus pour la tentative EN COURS, un par étape d'attaque
     /// réussie (FIFO) — voir Feed (enqueue), ConfirmHit (dequeue sur confirmation),
-    /// CheckHitConfirmationTimeout (échec si le plus ancien expire sans être confirmé).</summary>
+    /// CheckHitConfirmationTimeout (échec si le plus ancien expire sans être confirmé).
+    /// Vidée dès que la tentative en cours meurt (mauvaise touche, timeout, reset).</summary>
     private readonly Queue<DateTime> _pendingHitDeadlines = new();
 
+    /// <summary>Hits encore attendus par une tentative DÉJÀ TERMINÉE (toutes les bonnes touches
+    /// jouées) dont la finalisation est différée. Séparée de _pendingHitDeadlines depuis l'audit
+    /// 2026-08-07 (§E2) : les deux files étaient confondues, donc démarrer la répétition suivante
+    /// avant que le dernier hit soit confirmé faisait créditer la tentative n°1 par un hit de la
+    /// n°2 — et surtout, un échec de la n°2 purgeait la file commune, ce qui faisait perdre
+    /// définitivement le ComboCompleted (et le Streak++) d'une tentative pourtant réussie.
+    /// Une tentative en cours ne peut plus toucher à cette file-ci.</summary>
+    private readonly Queue<DateTime> _finalizingHitDeadlines = new();
+
     /// <summary>Vrai si la dernière étape du combo a réussi mais attend encore que
-    /// _pendingHitDeadlines se vide avant d'annoncer ComboCompleted/Streak++.</summary>
+    /// _finalizingHitDeadlines se vide avant d'annoncer ComboCompleted/Streak++.</summary>
     private bool _awaitingFinalConfirmation;
 
     // Historique de ce nombre (même jour) : 900ms (trop lent, vérifié seulement en fin de
@@ -108,13 +138,16 @@ public sealed class ComboRunner
     // **remonté à 600ms** après test réel : à 250ms, de vrais coups qui touchaient bel et
     // bien étaient invalidés avant même que le HUD ait eu le temps de refléter le hit (temps
     // de trajet de l'attaque + latence de detection), cassant la tentative en cours en plein
-    // milieu — et au passage, ce reset prématuré remettait aussi l'orientation miroir à zéro
-    // (ResetMirrorState), ce qui donnait l'impression que "la flèche changeait de sens" toute
-    // seule alors que le joueur continuait de jouer correctement. Ne pas redescendre sous ce
-    // seuil sans un vrai test en jeu qui le justifie. Voir aussi HudDamageSource.DebounceMs :
-    // avec la file FIFO ci-dessus, un HitDetected en trop (rien à confirmer) est
-    // silencieusement ignoré, donc le debounce court n'a pas besoin de remonter avec ceci.
-    private static readonly TimeSpan HitConfirmationWindow = TimeSpan.FromMilliseconds(600);
+    // milieu. Ne pas redescendre sous ce seuil sans un vrai test en jeu qui le justifie.
+    // Voir aussi HudDamageSource.DebounceMs : avec les files FIFO ci-dessus, un HitDetected en
+    // trop (rien à confirmer) est silencieusement ignoré, donc le debounce court n'a pas besoin
+    // de remonter avec ceci.
+    //
+    // Réglable depuis settings.json (OverlaySettings.HitConfirmationWindowMs) depuis l'audit
+    // 2026-08-07 (§F9) : c'est le paramètre du chemin critique qui a demandé le plus de
+    // réajustements en test réel, et il dépend du setup (latence d'affichage, type de coup) —
+    // le figer en constante privée obligeait à recompiler pour l'ajuster.
+    public TimeSpan HitConfirmationWindow { get; set; } = TimeSpan.FromMilliseconds(600);
 
     /// <summary>Number of consecutive full-combo completions since the last failure.</summary>
     public int Streak { get; private set; }
@@ -123,7 +156,6 @@ public sealed class ComboRunner
     public event Action<int, ComboFailReason>? StepFailed;
     public event Action? ComboCompleted;
     public event Action? ComboReset;
-    public event Action? ComboAbandoned;
 
     /// <summary>Levé quand les bonnes touches ont toutes été jouées mais qu'il manque encore
     /// des hits HUD confirmés pour finaliser (voir RequireHitConfirmation) — permet à l'UI de
@@ -135,14 +167,17 @@ public sealed class ComboRunner
     /// (Streak remis à zéro sauf KeepStreakOnFail).</summary>
     public event Action? HitNotConfirmed;
 
-    /// <summary>Dernier instant où Feed a été appelé — sert uniquement à
-    /// CheckAbandon (voir plus bas), pas à juger une étape.</summary>
-    private DateTime _lastFeedUtc = DateTime.MinValue;
+    /// <summary>Dernier instant où une étape a réussi (avancé CurrentStepIndex) — sert
+    /// uniquement à CheckMoveTimeout (voir plus bas), volontairement pas "dernier input
+    /// quel qu'il soit" : du bruit qui n'avance rien (mouvement, Saut...) ne doit pas
+    /// repousser ce délai.</summary>
+    private DateTime _lastStepSuccessUtc = DateTime.MinValue;
 
-    /// <summary>Ensemble d'actions (hors mouvement) validé par la dernière étape réussie.
-    /// Sert uniquement à tolérer un mash/répétition du même bouton juste après (voir
-    /// docstring de classe) — pas une histoire de délai, juste un état mémorisé.</summary>
-    private HashSet<string> _lastConsumedActionKeys = new();
+    // _lastConsumedActionKeys / _lastConsumedMovement (mémorisation du dernier coup validé, qui
+    // servait à tolérer un re-appui du même bouton) ont été supprimés le 2026-08-08 : la
+    // tolérance qu'ils alimentaient avalait le cas "nLight alors que l'étape demande dLight",
+    // signalé par l'utilisateur. Elle est remplacée par le paramètre triggeredBy de Feed, bien
+    // plus précis — voir la branche d'échec.
 
     /// <summary>If true, a failed combo keeps its Streak instead of resetting to 0.</summary>
     public bool KeepStreakOnFail { get; set; }
@@ -153,11 +188,14 @@ public sealed class ComboRunner
         KeepStreakOnFail = keepStreakOnFail;
     }
 
-    public void Feed(List<KeyBind> pressedBindsThisTick, DateTime timestamp)
+    /// <param name="triggeredBy">La touche/bouton NOUVELLEMENT pressé qui provoque ce tick
+    /// (l'auto-répétition OS est déjà filtrée par l'appelant), ou null si l'appelant ne le sait
+    /// pas. C'est le discriminant qui permet de distinguer "un nouveau coup vient de sortir en
+    /// jeu" de "l'ensemble tenu a changé sans qu'aucune attaque ne parte" — voir la branche
+    /// d'échec.</param>
+    public void Feed(List<KeyBind> pressedBindsThisTick, DateTime timestamp, KeyBind? triggeredBy = null)
     {
         if (Combo.Steps.Count == 0) return;
-
-        _lastFeedUtc = timestamp;
 
         var step = Combo.Steps[CurrentStepIndex];
         var required = new HashSet<string>(step.RequiredActions);
@@ -174,34 +212,27 @@ public sealed class ComboRunner
         requiredMovementNames = CanonicalizeHorizontal(NormalizeMovement(requiredMovementNames));
         pressedMovement = CanonicalizeHorizontal(pressedMovement);
 
-        var effectiveRequiredMovement = requiredMovementNames;
+        // Une étape qui FRAPPE est jugée sur la direction EXACTE, pas sur un simple "au moins
+        // ça" — parce qu'en Brawlhalla la direction fait partie du coup : nLight, sLight et
+        // dLight sont le MÊME bouton, seule la direction tenue change le move qui sort. Tolérer
+        // une direction en trop revenait donc à confondre trois attaques différentes :
+        //   - une étape nLight (aucune direction requise) était validée par un dLight, puisque
+        //     le "Bas" en trop passait pour du mouvement libre ;
+        //   - et réciproquement, faire nLight quand l'étape demande dLight ne cassait rien (voir
+        //     la branche d'échec plus bas).
+        // "Les déplacements sont libres" veut dire qu'on peut se déplacer ENTRE les coups, pas
+        // qu'on peut tenir une direction au moment de frapper sans changer d'attaque. Les étapes
+        // qui ne frappent pas (Saut, Esquive/Dash, direction seule) gardent la tolérance : là,
+        // une direction en plus ne change réellement rien.
+        // Signalé par l'utilisateur le 2026-08-08 après test en jeu.
+        var stepHasAttack = requiredAction.Overlaps(DamagingActions);
+        bool movementOk = stepHasAttack
+            ? requiredMovementNames.SetEquals(pressedMovement)
+            : requiredMovementNames.IsSubsetOf(pressedMovement);
 
-        bool movementOk = effectiveRequiredMovement.IsSubsetOf(pressedMovement);
-
-        // En mode Strict, une direction tenue en plus de ce qui est demandé compte
-        // aussi contre le joueur (pas seulement les boutons d'action) — c'est ce qui
-        // distingue réellement Strict de IgnoreExtraneous, qui lui ignore toujours le
-        // mouvement pur hors combo (comportement précédemment appliqué aux deux modes
-        // sans distinction, un bug signalé dans docs/audit_features.md §1.1).
-        // ComboStep.FreeMovement permet de tolérer ce même excédent sur une étape
-        // précise même en Strict (ex. un coup qui demande de se décaler pour toucher
-        // la hitbox, sans que ce décalage fasse partie du combo lui-même).
-        var extraMovement = new HashSet<string>(pressedMovement);
-        extraMovement.ExceptWith(effectiveRequiredMovement);
-
-        // Sauter tient presque toujours une direction en même temps en jeu (bouger en
-        // l'air) — jamais une faute, quel que soit MatchMode, sans avoir à cocher
-        // FreeMovement à la main sur chaque étape de saut.
-        bool requiresJump = requiredAction.Contains("Saut");
-
-        bool strictMovementViolation = Combo.MatchMode == MatchMode.Strict
-            && !step.FreeMovement
-            && !requiresJump
-            && extraMovement.Count > 0;
-
-        if (movementOk && !strictMovementViolation && pressedAction.SetEquals(requiredAction))
+        if (movementOk && pressedAction.SetEquals(requiredAction))
         {
-            _lastConsumedActionKeys = requiredAction;
+            _lastStepSuccessUtc = timestamp;
             State = ComboRunState.InProgress;
 
             // CurrentStepIndex doit avancer AVANT de lever StepSucceeded : les handlers UI
@@ -239,7 +270,11 @@ public sealed class ComboRunner
                     // Le dernier coup du combo (ou un coup précédent) n'a pas encore été
                     // confirmé — on attend que la file se vide (ConfirmHit) ou expire
                     // (CheckHitConfirmationTimeout) avant d'annoncer une réussite qui n'a
-                    // peut-être pas eu lieu.
+                    // peut-être pas eu lieu. Les échéances sont TRANSFÉRÉES dans la file de
+                    // finalisation (voir _finalizingHitDeadlines) : la tentative suivante,
+                    // qui peut démarrer dès maintenant, ne doit plus pouvoir ni les consommer
+                    // ni les purger.
+                    while (_pendingHitDeadlines.Count > 0) _finalizingHitDeadlines.Enqueue(_pendingHitDeadlines.Dequeue());
                     _awaitingFinalConfirmation = true;
                     ComboAwaitingHitConfirmation?.Invoke();
                 }
@@ -248,59 +283,64 @@ public sealed class ComboRunner
             return;
         }
 
-        // Boutons d'action pressés qui ne font pas partie de ce qui est attendu ici.
-        var wrongActions = new HashSet<string>(pressedAction);
-        wrongActions.ExceptWith(requiredAction);
+        // Attaques réellement pressées ce tick (Att. légère/Att. forte/Lancer).
+        //
+        // On regarde ce qui est PRESSÉ, plus la différence avec ce qui est requis : c'était le
+        // second volet du même bug. Faire nLight quand l'étape demande dLight presse bien
+        // "Att. légère", qui EST l'action requise — la différence ensemblistE était donc vide et
+        // l'entrée passait pour "on est encore en train de construire l'étape", silencieusement
+        // ignorée. Or en jeu un nLight est bel et bien sorti, et il n'a pas touché : le combo est
+        // mort. Ce qui compte n'est pas "a-t-il appuyé sur un bouton interdit", c'est "le coup
+        // qui vient de sortir est-il celui qu'on attendait" — et si l'étape n'a pas été validée
+        // juste au-dessus, c'est non.
+        var pressedAttacks = new HashSet<string>(pressedAction);
+        pressedAttacks.IntersectWith(DamagingActions);
 
-        // Rien d'inattendu : soit on est encore en train de construire l'étape (une
-        // partie seulement des boutons requis est enfoncée, ou la direction requise
-        // manque encore), soit c'est du mouvement pur toléré (IgnoreExtraneous, ou
-        // Strict sans extra de mouvement) — jamais un échec dans ce cas.
-        if (wrongActions.Count == 0 && !strictMovementViolation)
+        // Aucune attaque ce tick : mouvement, Saut, Esquive/Dash en trop, ou étape en cours de
+        // construction (la direction tenue avant d'appuyer sur l'attaque). Jamais fautif — c'est
+        // la vraie "liberté de déplacement", et RequireHitConfirmation vérifie de toute façon si
+        // le combo touche vraiment.
+        if (pressedAttacks.Count == 0)
         {
             return;
         }
 
-        // Un extra de mouvement en Strict est une faute à part entière, jamais
-        // toléré comme du mash (contrairement aux boutons d'action, tenir une
-        // direction en trop n'est pas un "réflexe de martelage").
-        if (strictMovementViolation)
-        {
-            if (CurrentStepIndex == 0) return;
+        // Un bouton d'attaque figure dans l'ensemble tenu, mais est-ce qu'un NOUVEAU coup vient
+        // réellement de sortir en jeu ? Seulement si c'est bien lui qui a déclenché ce tick.
+        //
+        // Sans cette distinction, ajouter une direction en gardant le bouton d'attaque enfoncé
+        // (typiquement en transition dLight → sLight : on presse Droite avant d'avoir relâché
+        // Light) produisait un tick contenant une attaque, jugé comme un coup raté — alors
+        // qu'aucun nouveau coup n'est parti, la touche était déjà tenue.
+        //
+        // C'est ce discriminant qui remplace l'ancienne "tolérance de mash" : celle-ci laissait
+        // passer tout re-tap du bouton précédent, ce qui avalait justement le cas signalé par
+        // l'utilisateur (refaire nLight quand l'étape demande dLight ne cassait rien). Un vrai
+        // second appui sur l'attaque fait maintenant sortir un vrai second coup, donc casse la
+        // tentative si ce n'est pas celui attendu — pendant qu'un simple changement de direction
+        // touche tenue reste transparent.
+        var newAttackPressed = triggeredBy is null
+            ? true // appelant qui ne fournit pas l'info : on reste strict (comportement d'avant)
+            : DamagingActions.Contains(triggeredBy.Action);
 
-            StepFailed?.Invoke(CurrentStepIndex, ComboFailReason.WrongInput);
-            State = ComboRunState.Failed;
-            if (!KeepStreakOnFail) Streak = 0;
-            CurrentStepIndex = 0;
-            State = ComboRunState.Waiting;
-            _lastConsumedActionKeys = new HashSet<string>();
-            ClearPendingHitConfirmation();
-            ComboReset?.Invoke();
-            return;
-        }
-
-        // Le bouton de la toute première étape qui revient pendant une tentative en cours
-        // doit TOUJOURS faire échouer le combo, même s'il correspond à la tolérance de
-        // mash ci-dessous : sans ça, marteler l'ensemble de ses touches en boucle finit
-        // par "valider" un combo par hasard (chaque bonne touche apparaît tôt ou tard
-        // dans la boucle, et le retour périodique de la 1ère touche était toléré comme du
-        // mash au lieu de reset). Ne s'applique qu'à partir de la 2ème étape : à l'étape 0,
-        // c'est justement l'input attendu.
-        var firstRequired = new HashSet<string>(Combo.Steps[0].RequiredActions);
-        var (_, firstRequiredAction) = SplitByMovement(firstRequired, pressedBindsThisTick);
-        bool firstStepInputRecurring = CurrentStepIndex != 0 && wrongActions.SetEquals(firstRequiredAction);
-
-        // Mash/répétition/chevauchement du bouton qui vient de valider l'étape précédente
-        // (ex. cliquer Saut 3 fois pour caler son timing, ou retaper la touche suivante
-        // avant d'avoir complètement relâché la précédente — le move est déjà lancé en
-        // jeu, donc retaper dessus ne fait rien) : on l'ignore au lieu de casser la suite.
-        // IsSubsetOf (pas SetEquals) tolère aussi le cas où SEULE une partie de l'excédent
-        // est ce résidu — le reste (une vraie touche inattendue) fait toujours échouer,
-        // seul le résidu du bouton précédent est transparent.
-        if (!firstStepInputRecurring && wrongActions.IsSubsetOf(_lastConsumedActionKeys))
+        if (!newAttackPressed)
         {
             return;
         }
+
+        // L'ancienne "tolérance de mash" (ignorer tout re-appui du bouton qui venait de valider
+        // l'étape précédente) et le garde-fou firstStepInputRecurring qui l'encadrait ont tous
+        // deux été supprimés ici, remplacés par le test newAttackPressed ci-dessus :
+        //   - la tolérance avalait exactement le cas signalé par l'utilisateur (refaire nLight
+        //     quand l'étape demande dLight ne cassait rien), puisqu'elle ne regardait que le
+        //     bouton et pas la direction ;
+        //   - le garde-fou anti-mash devient inutile maintenant que la direction fait partie du
+        //     coup : traverser un combo par hasard exigerait de reproduire la bonne direction ET
+        //     le bon bouton à chaque étape, c'est-à-dire de jouer le combo.
+        // Le seul cas légitime que la tolérance protégeait (chevauchement de touches, quand on
+        // ajoute une direction sans avoir relâché l'attaque) est couvert plus précisément par
+        // newAttackPressed, qui distingue un vrai second appui d'un simple changement de
+        // l'ensemble tenu.
 
         // Tant qu'aucune étape n'a encore été validée (CurrentStepIndex == 0), il
         // n'y a aucune progression à perdre : un input qui ne correspond pas au
@@ -313,7 +353,6 @@ public sealed class ComboRunner
         if (!KeepStreakOnFail) Streak = 0;
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
-        _lastConsumedActionKeys = new HashSet<string>();
         ClearPendingHitConfirmation();
         ComboReset?.Invoke();
     }
@@ -385,80 +424,111 @@ public sealed class ComboRunner
     {
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
-        _lastConsumedActionKeys = new HashSet<string>();
-        ClearPendingHitConfirmation();
+        ClearAllHitConfirmation();
     }
 
-    /// <summary>Appelé périodiquement (polling, pas à chaque input) pour abandonner
-    /// une tentative en cours si le joueur n'a rien pressé depuis <paramref name="timeout"/> :
-    /// pas une faute de timing sur une étape (voir docstring de classe, le timing n'est
-    /// jamais un échec), juste un "il a arrêté, on relâche l'attente" pour ne pas rester
-    /// bloqué indéfiniment au milieu d'un combo. Sans effet tant qu'aucune étape n'a
-    /// encore été validée (rien à abandonner).</summary>
-    public void CheckAbandon(DateTime now, TimeSpan timeout)
+    /// <summary>Appelé périodiquement (polling, pas à chaque input) pour invalider une
+    /// tentative en cours si plus de <paramref name="maxDelay"/> s'est écoulé depuis la
+    /// dernière étape réussie : demande explicite de l'utilisateur — au-delà de ce délai
+    /// entre deux coups, c'est forcément raté (l'ouverture réelle en jeu ne dure pas aussi
+    /// longtemps), même si le joueur arrive ensuite à reprendre le combo depuis le début.
+    /// Contrairement au reste du moteur (voir docstring de classe : ni MinDelayMs/MaxDelayMs
+    /// par étape, ni le mouvement/Saut/Esquive en trop ne sont des échecs), c'est une vraie
+    /// faute — mêmes conséquences qu'une mauvaise touche (StepFailed avec
+    /// ComboFailReason.Timeout, flash rouge côté UI, Streak remis à zéro sauf
+    /// KeepStreakOnFail) plutôt qu'un simple relâchement silencieux. Sans effet tant
+    /// qu'aucune étape n'a encore été validée (rien à invalider).</summary>
+    public void CheckMoveTimeout(DateTime now, TimeSpan maxDelay)
     {
         if (CurrentStepIndex == 0) return;
-        if (now - _lastFeedUtc < timeout) return;
+        if (now - _lastStepSuccessUtc < maxDelay) return;
 
+        var failedIndex = CurrentStepIndex;
+        StepFailed?.Invoke(failedIndex, ComboFailReason.Timeout);
+        State = ComboRunState.Failed;
         if (!KeepStreakOnFail) Streak = 0;
         CurrentStepIndex = 0;
         State = ComboRunState.Waiting;
-        _lastConsumedActionKeys = new HashSet<string>();
         ClearPendingHitConfirmation();
-        ComboAbandoned?.Invoke();
+        ComboReset?.Invoke();
     }
 
-    /// <summary>Purge la file de hits attendus et l'attente de finalisation — appelé partout
-    /// où la tentative en cours est abandonnée (échec, abandon, reset manuel) : les hits
-    /// encore attendus pour cette tentative morte n'ont plus de sens à confirmer.</summary>
+    /// <summary>Purge les hits attendus par la tentative EN COURS — appelé partout où celle-ci
+    /// est abandonnée (mauvaise touche, timeout de coup, reset manuel) : ces hits n'ont plus de
+    /// sens à confirmer. Ne touche volontairement PAS à _finalizingHitDeadlines (§E2) : une
+    /// tentative déjà entièrement jouée garde sa chance d'être confirmée même si la répétition
+    /// suivante, démarrée entre-temps, échoue.</summary>
     private void ClearPendingHitConfirmation()
     {
         _pendingHitDeadlines.Clear();
+    }
+
+    /// <summary>Purge tout, tentative en cours ET finalisation différée — uniquement pour un
+    /// vrai reset externe (changement de combo actif), où plus rien du passé n'a de sens.</summary>
+    private void ClearAllHitConfirmation()
+    {
+        _pendingHitDeadlines.Clear();
+        _finalizingHitDeadlines.Clear();
         _awaitingFinalConfirmation = false;
     }
 
     /// <summary>Appelé quand HudDamageSource détecte un hit (voir MainWindow.OnHudHitDetected) :
-    /// confirme le plus ancien hit encore attendu (FIFO), qu'il s'agisse d'une étape déjà
-    /// dépassée mid-combo ou de la finalisation du combo. Un hit sans rien à confirmer (file
-    /// vide) est silencieusement ignoré — le signal HUD ne sait pas distinguer la source des
-    /// dégâts, un hit "en trop" (ex. debounce court, plusieurs frames d'une même animation)
-    /// n'est pas une erreur.</summary>
+    /// confirme le plus ancien hit encore attendu. Une tentative déjà terminée en attente de
+    /// finalisation (_finalizingHitDeadlines) est servie EN PREMIER — ses hits sont forcément
+    /// plus anciens que ceux d'une tentative démarrée après elle, donc c'est bien l'ordre FIFO
+    /// global. Un hit sans rien à confirmer (les deux files vides) est silencieusement ignoré :
+    /// le signal HUD ne sait pas distinguer la source des dégâts, un hit "en trop" (debounce
+    /// court, plusieurs frames d'une même animation) n'est pas une erreur.</summary>
     public void ConfirmHit(DateTime now)
     {
-        if (_pendingHitDeadlines.Count == 0) return;
-
-        _pendingHitDeadlines.Dequeue();
-
-        if (_awaitingFinalConfirmation && _pendingHitDeadlines.Count == 0)
+        if (_finalizingHitDeadlines.Count > 0)
         {
-            _awaitingFinalConfirmation = false;
-            Streak++;
-            ComboCompleted?.Invoke();
+            _finalizingHitDeadlines.Dequeue();
+            if (_awaitingFinalConfirmation && _finalizingHitDeadlines.Count == 0)
+            {
+                _awaitingFinalConfirmation = false;
+                Streak++;
+                ComboCompleted?.Invoke();
+            }
+            return;
         }
+
+        if (_pendingHitDeadlines.Count == 0) return;
+        _pendingHitDeadlines.Dequeue();
     }
 
     /// <summary>Polling fréquent (voir MainWindow, timer dédié) : si le plus ancien hit encore
-    /// attendu dépasse sa fenêtre (HitConfirmationWindow) sans être confirmé, toute la
-    /// tentative en cours est invalidée tout de suite — y compris si le joueur est déjà allé
-    /// plus loin dans le combo (un coup qui a raté au milieu casse la tentative, continuer à
-    /// taper les étapes suivantes ne peut plus la sauver). Voir docstring de
-    /// RequireHitConfirmation : vérifié dès la 1ère étape d'attaque, pas seulement en fin de
-    /// combo.</summary>
+    /// attendu dépasse sa fenêtre (HitConfirmationWindow) sans être confirmé, la tentative
+    /// concernée est invalidée tout de suite — y compris si le joueur est déjà allé plus loin
+    /// dans le combo (un coup qui a raté au milieu casse la tentative, continuer à taper les
+    /// étapes suivantes ne peut plus la sauver). Traite les deux files séparément (§E2) : une
+    /// finalisation qui expire invalide la tentative terminée, sans toucher à celle en cours,
+    /// et réciproquement.</summary>
     public void CheckHitConfirmationTimeout(DateTime now)
     {
-        if (_pendingHitDeadlines.Count == 0) return;
-        if (now <= _pendingHitDeadlines.Peek()) return;
+        var failed = false;
 
-        ClearPendingHitConfirmation();
-        if (!KeepStreakOnFail) Streak = 0;
-
-        if (CurrentStepIndex > 0)
+        if (_finalizingHitDeadlines.Count > 0 && now > _finalizingHitDeadlines.Peek())
         {
-            CurrentStepIndex = 0;
-            State = ComboRunState.Waiting;
-            _lastConsumedActionKeys = new HashSet<string>();
+            _finalizingHitDeadlines.Clear();
+            _awaitingFinalConfirmation = false;
+            failed = true;
         }
 
+        if (_pendingHitDeadlines.Count > 0 && now > _pendingHitDeadlines.Peek())
+        {
+            _pendingHitDeadlines.Clear();
+            if (CurrentStepIndex > 0)
+            {
+                CurrentStepIndex = 0;
+                State = ComboRunState.Waiting;
+            }
+            failed = true;
+        }
+
+        if (!failed) return;
+
+        if (!KeepStreakOnFail) Streak = 0;
         HitNotConfirmed?.Invoke();
     }
 }

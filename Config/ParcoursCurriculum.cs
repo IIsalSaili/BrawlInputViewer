@@ -257,7 +257,13 @@ public static class ParcoursCurriculum
                 new LessonStep { RequiredActions = new() { "Gauche", "Esquive" } },
             },
             FullyValidatedByApp = false,
-            VerifyYourselfNote = "L'app ne connaît pas le sens où ton personnage regarde — en jeu, backdash veut dire dasher vers l'arrière par rapport à ton orientation, pas forcément vers la gauche.",
+            // Note complétée lors de l'audit 2026-08-07 (§F4) : ComboRunner.CanonicalizeHorizontal
+            // fusionne Gauche et Droite en un seul jeton pour TOUS ses consommateurs, y compris le
+            // ComboRunner éphémère de cette leçon. Cette leçon-ci valide donc les deux sens
+            // indifféremment — conséquence directe et assumée de la règle produit "gauche et droite
+            // reviennent au même", mais qui mérite d'être dite ici plutôt que de laisser croire que
+            // le drill vérifie l'orientation.
+            VerifyYourselfNote = "L'app ne connaît pas le sens où ton personnage regarde — en jeu, backdash veut dire dasher vers l'arrière par rapport à ton orientation, pas forcément vers la gauche. Concrètement, ce drill se valide avec Gauche OU Droite : c'est à toi de vérifier en jeu que tu pars bien vers l'arrière.",
             SourceNote = "Confirmé par l'utilisateur (expérience de jeu personnelle) : même mécanique que le Dash, vers l'arrière, pour distance/whiff punish, 2026-08-03.",
         },
 

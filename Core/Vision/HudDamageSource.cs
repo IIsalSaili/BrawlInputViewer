@@ -1,5 +1,5 @@
 using System;
-using System.Windows.Threading;
+using System.Threading;
 
 namespace BrawlhallaOverlay;
 
@@ -7,13 +7,23 @@ namespace BrawlhallaOverlay;
 /// Phase 1a de docs/plan_improve_combo.md §3.1.1a : détecte qu'un hit a probablement eu lieu
 /// en surveillant une petite zone du HUD (dégâts adverses) pour un changement de pixels — pas
 /// d'OCR, pas de montant, juste "quelque chose a changé là où les dégâts s'affichent". Poll à
-/// basse fréquence (même principe que ComboRunner.CheckAbandon / AutoHideEnabled : un
+/// basse fréquence (même principe que ComboRunner.CheckMoveTimeout / AutoHideEnabled : un
 /// DispatcherTimer, pas une boucle serrée) pour rester négligeable en CPU/GPU pendant que le
 /// jeu tourne.
 ///
-/// Purement une source de signal : ne touche jamais à ComboRunner ni à AppState. L'appelant
-/// (MainWindow) décide quoi faire du signal — actuellement rien d'autre qu'un badge indicatif,
-/// voir §6 du plan ("le silence est le comportement par défaut d'un signal incertain").
+/// Purement une source de signal : ne touche jamais à ComboRunner ni à AppState. C'est
+/// l'appelant (MainWindow) qui décide quoi en faire — et depuis la Version 24 il en fait
+/// beaucoup : ce signal CONDITIONNE la validation d'un combo (ComboRunner.RequireHitConfirmation).
+/// Le commentaire d'origine, qui décrivait encore ce signal comme un simple badge indicatif,
+/// était faux depuis (audit 2026-08-07 §E3).
+///
+/// Le poll tourne sur un thread de pool, pas sur le thread UI (audit 2026-08-07 §M2) : la
+/// capture GDI (allocation d'un Bitmap + BitBlt écran + copie ligne par ligne) était exécutée
+/// 16 fois par seconde sur le thread qui sert AUSSI le hook clavier bas niveau. Un tick trop
+/// long au-delà de LowLevelHooksTimeout (300 ms par défaut) fait retirer le hook par Windows
+/// sans le moindre message : l'app cesse alors de capter les touches tout en ayant l'air de
+/// tourner normalement. Poll() ne fait que du calcul sur byte[], il n'a aucun besoin du thread
+/// UI ; les abonnés (qui touchent l'UI) marshallent déjà via Dispatcher.Invoke.
 /// </summary>
 public sealed class HudDamageSource : IDisposable
 {
@@ -52,10 +62,47 @@ public sealed class HudDamageSource : IDisposable
     private const double BoostedChangedPixelRatioThreshold = 0.004;
     private const int PerChannelNoiseTolerance = 18;
 
-    private readonly DispatcherTimer _timer;
+    // Cadence de repli quand la zone n'a rien montré depuis un moment (jeu pas lancé, menu,
+    // alt-tab) — audit 2026-08-07 §M15 : la capture tournait à pleine cadence en permanence dès
+    // le lancement de l'app, y compris lancée au démarrage de Windows sans jeu ouvert. On
+    // repasse à la cadence rapide au premier signe de vie.
+    private const int IdlePollIntervalMs = 500;
+    private static readonly TimeSpan IdleAfter = TimeSpan.FromSeconds(30);
+
+    /// <summary>Au-delà de ce délai sans le moindre changement observé dans la zone, on considère
+    /// que le calibrage ne regarde rien de vivant (mauvaise résolution, jeu fermé, HUD ailleurs)
+    /// et que ce signal n'est PAS digne de conditionner la validation d'un combo — voir
+    /// <see cref="HasLiveSignal"/>.</summary>
+    private static readonly TimeSpan LiveSignalWindow = TimeSpan.FromMinutes(2);
+
+    private readonly Timer _timer;
+    private int _polling; // garde de réentrance : un tick lent ne doit pas en chevaucher un autre
+    private bool _running;
+    private int _currentIntervalMs = PollIntervalMs;
     private byte[]? _previousFrame;
     private DateTime _lastSignal = DateTime.MinValue;
+    private DateTime _lastChangeUtc = DateTime.MinValue;
     private bool _boosted;
+
+    /// <summary>Vrai si la zone surveillée a montré au moins un vrai changement récemment.
+    ///
+    /// Garde-fou central de l'audit 2026-08-07 §C1 : la détection de hit est activée par défaut
+    /// sur une ROI codée en dur (celle d'un seul setup). Dès que cette zone ne correspond pas —
+    /// autre résolution, autre mise à l'échelle, jeu pas au premier plan, jeu pas lancé, simple
+    /// entraînement au clavier sur le bureau — aucun hit n'arrive jamais, et comme le signal
+    /// conditionne la validation, CHAQUE étape d'attaque cassait la tentative au bout de la
+    /// fenêtre de confirmation. L'app devenait inutilisable sans qu'aucun message n'explique
+    /// pourquoi.
+    ///
+    /// Tant que la zone n'a rien montré, on considère le signal non fiable et le gate est levé :
+    /// l'app se comporte exactement comme avant la Version 24. C'est le bon sens de repli — un
+    /// gate désactivé à tort ne fait que valider un combo qu'on aurait peut-être dû refuser,
+    /// alors qu'un gate actif à tort rend l'entraînement impossible.</summary>
+    public bool HasLiveSignal => DateTime.UtcNow - _lastChangeUtc <= LiveSignalWindow;
+
+    /// <summary>Vrai si la source tourne mais n'a encore jamais rien vu bouger — permet à l'UI
+    /// de le dire explicitement plutôt que de laisser croire que la détection fonctionne.</summary>
+    public bool IsRunningWithoutSignal => _running && !HasLiveSignal;
 
     public event Action? HitDetected;
 
@@ -67,21 +114,25 @@ public sealed class HudDamageSource : IDisposable
 
     public HudDamageSource()
     {
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollIntervalMs) };
-        _timer.Tick += (_, _) => Poll();
+        _timer = new Timer(_ => Poll(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     public void Start(int x, int y, int width, int height)
     {
         _roiX = x; _roiY = y; _roiWidth = width; _roiHeight = height;
         _previousFrame = null;
-        _timer.Start();
+        _lastChangeUtc = DateTime.MinValue;
+        _running = true;
+        _currentIntervalMs = PollIntervalMs;
+        _timer.Change(PollIntervalMs, PollIntervalMs);
     }
 
     public void Stop()
     {
-        _timer.Stop();
+        _running = false;
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
         _previousFrame = null;
+        _lastChangeUtc = DateTime.MinValue;
     }
 
     /// <summary>Bascule vers un seuil de détection beaucoup plus sensible (donc plus sujet aux
@@ -94,23 +145,55 @@ public sealed class HudDamageSource : IDisposable
 
     private void Poll()
     {
-        var frame = ScreenRegionCapture.Capture(_roiX, _roiY, _roiWidth, _roiHeight);
-        if (frame is null) return;
-
-        if (_previousFrame is not null && _previousFrame.Length == frame.Length)
+        // Un tick ne doit jamais chevaucher le précédent : System.Threading.Timer, contrairement
+        // à DispatcherTimer, peut relancer le callback sur un autre thread du pool avant que le
+        // précédent soit fini si la capture prend plus longtemps que l'intervalle.
+        if (Interlocked.Exchange(ref _polling, 1) == 1) return;
+        try
         {
-            var ratio = ChangedPixelRatio(_previousFrame, frame);
-            Sampled?.Invoke(ratio);
+            var frame = ScreenRegionCapture.Capture(_roiX, _roiY, _roiWidth, _roiHeight);
+            if (frame is null) return;
 
-            var threshold = _boosted ? BoostedChangedPixelRatioThreshold : ChangedPixelRatioThreshold;
-            if (ratio >= threshold && (DateTime.UtcNow - _lastSignal).TotalMilliseconds > DebounceMs)
+            if (_previousFrame is not null && _previousFrame.Length == frame.Length)
             {
-                _lastSignal = DateTime.UtcNow;
-                HitDetected?.Invoke();
-            }
-        }
+                var ratio = ChangedPixelRatio(_previousFrame, frame);
+                Sampled?.Invoke(ratio);
 
-        _previousFrame = frame;
+                var threshold = _boosted ? BoostedChangedPixelRatioThreshold : ChangedPixelRatioThreshold;
+                var now = DateTime.UtcNow;
+                if (ratio >= threshold)
+                {
+                    // Marque la zone comme "vivante" même si le debounce avale l'événement :
+                    // c'est bien la preuve que le calibrage regarde quelque chose qui bouge.
+                    _lastChangeUtc = now;
+                    if ((now - _lastSignal).TotalMilliseconds > DebounceMs)
+                    {
+                        _lastSignal = now;
+                        HitDetected?.Invoke();
+                    }
+                }
+
+                AdjustPollRate(now);
+            }
+
+            _previousFrame = frame;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _polling, 0);
+        }
+    }
+
+    /// <summary>Ralentit le poll quand la zone est inerte depuis longtemps, et le réaccélère dès
+    /// le premier changement (§M15). Sans effet sur la logique de détection elle-même.</summary>
+    private void AdjustPollRate(DateTime now)
+    {
+        if (!_running) return;
+        var idle = now - _lastChangeUtc > IdleAfter;
+        var wanted = idle ? IdlePollIntervalMs : PollIntervalMs;
+        if (wanted == _currentIntervalMs) return;
+        _currentIntervalMs = wanted;
+        _timer.Change(wanted, wanted);
     }
 
     private static double ChangedPixelRatio(byte[] previous, byte[] current)
@@ -133,5 +216,9 @@ public sealed class HudDamageSource : IDisposable
         return (double)changed / pixelCount;
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        Stop();
+        _timer.Dispose();
+    }
 }

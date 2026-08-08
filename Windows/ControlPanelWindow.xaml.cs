@@ -76,7 +76,16 @@ public partial class ControlPanelWindow : Window
         // (Att. légère, Taunt...) : sans ça, jouer/enregistrer un combo pendant
         // que le panneau a le focus changeait d'onglet à chaque appui. Onglet =
         // souris uniquement.
-        _nav.PreviewKeyDown += (_, e) => e.Handled = true;
+        // Ne bloque QUE ce qui pilote réellement la sélection du ListBox (flèches, Home/End,
+        // Espace/Entrée, et la recherche incrémentale native déclenchée par une lettre — "G"
+        // sautait au premier onglet commençant par G, or G est la touche Taunt). Tab et
+        // Shift+Tab restent disponibles : l'ancienne version marquait TOUT comme géré, ce qui
+        // rendait la fenêtre entière inutilisable au clavier (audit 2026-08-07 §F3).
+        _nav.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key is Key.Tab or Key.LeftShift or Key.RightShift) return;
+            e.Handled = true;
+        };
         Grid.SetColumn(_nav, 0);
         root.Children.Add(_nav);
 
@@ -88,11 +97,20 @@ public partial class ControlPanelWindow : Window
 
         _nav.SelectedIndex = 0;
 
-        Closed += (_, _) => _unsubscribeCurrentTab?.Invoke();
+        Closed += (_, _) =>
+        {
+            _cancelActiveListen?.Invoke();
+            _unsubscribeCurrentTab?.Invoke();
+        };
     }
 
     private void ShowTab(int index)
     {
+        // Coupe toute écoute de touche encore armée avant de quitter l'onglet (§E4) : sinon elle
+        // survivait au changement d'onglet et capturait la prochaine touche tapée n'importe où.
+        _cancelActiveListen?.Invoke();
+        _cancelActiveListen = null;
+
         _unsubscribeCurrentTab?.Invoke();
         _unsubscribeCurrentTab = null;
 
@@ -276,21 +294,24 @@ public partial class ControlPanelWindow : Window
             };
             keyBtn.Click += (_, _) =>
             {
+                _cancelActiveListen?.Invoke();
                 var original = keyBtn.Content;
-                keyBtn.Content = "…";
-                ListenForNextKey(vk =>
-                {
-                    var current = getVk();
-                    if (AllShortcutVks().Any(v => v != current && v == vk))
+                keyBtn.Content = "… (6s)";
+                ListenForNextKey(
+                    onCaptured: vk =>
                     {
-                        MessageBox.Show($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk)} est déjà utilisé par un autre raccourci.", "Touche déjà utilisée", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        keyBtn.Content = original;
-                        return;
-                    }
-                    setVk(vk);
-                    AppState.SaveSettings();
-                    keyBtn.Content = $"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk)}";
-                });
+                        var current = getVk();
+                        if (AllShortcutVks().Any(v => v != current && v == vk))
+                        {
+                            MessageBox.Show($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk)} est déjà utilisé par un autre raccourci.", "Touche déjà utilisée", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            keyBtn.Content = original;
+                            return;
+                        }
+                        setVk(vk);
+                        AppState.SaveSettings();
+                        keyBtn.Content = $"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(vk)}";
+                    },
+                    onCancelled: () => keyBtn.Content = original);
             };
             row.Children.Add(keyBtn);
             return row;
@@ -426,14 +447,31 @@ public partial class ControlPanelWindow : Window
         advancedPanel.Children.Add(sessionRow);
 
         advancedPanel.Children.Add(SectionTitle("Détection de hit (expérimental)"));
-        advancedPanel.Children.Add(HelpText("Surveille une petite zone du HUD (dégâts de l'ADVERSAIRE) et affiche un badge quand elle change — aucun montant lu, juste \"quelque chose a changé\". Purement informatif : ne fait jamais échouer ni réussir un combo. Nécessite d'avoir activé \"Nombre de dégâts\" dans les réglages Brawlhalla et de calibrer la zone une fois par résolution d'écran. Voir docs/plan_improve_combo.md."));
+        // Texte réécrit lors de l'audit 2026-08-07 (§E3) : il affirmait « Purement informatif :
+        // ne fait jamais échouer ni réussir un combo », ce qui est faux depuis la Version 24 —
+        // c'est même devenu le mécanisme le plus impactant de l'app. Un utilisateur dont les
+        // combos étaient invalidés n'avait aucune raison de soupçonner ce réglage : l'aide en
+        // place le disculpait explicitement.
+        advancedPanel.Children.Add(HelpText("⚠ Ce réglage CONDITIONNE la validation des combos : quand la zone surveillée est active, un combo n'est compté comme réussi que si le HUD confirme un hit pour chaque coup porté. Il surveille une petite zone du HUD (dégâts de l'ADVERSAIRE) et détecte qu'elle a changé — aucun montant n'est lu. Sécurité intégrée : tant que la zone n'a rien montré de vivant (mauvaise résolution, jeu fermé, HUD ailleurs), la validation N'EST PAS conditionnée et l'app se comporte comme si ce réglage était éteint. Nécessite \"Nombre de dégâts\" activé dans les réglages Brawlhalla, et un calibrage par résolution d'écran."));
 
         var hudRoiStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 4) };
         void UpdateHudRoiStatus()
         {
-            hudRoiStatus.Text = AppState.Settings.HudRoiCalibrated
-                ? $"Zone calibrée : {AppState.Settings.HudRoiWidth}×{AppState.Settings.HudRoiHeight}px à ({AppState.Settings.HudRoiX},{AppState.Settings.HudRoiY})."
-                : "Aucune zone calibrée pour l'instant.";
+            if (!AppState.Settings.HudRoiCalibrated)
+            {
+                hudRoiStatus.Text = "Aucune zone calibrée pour l'instant.";
+                return;
+            }
+
+            // Dit si la zone est réellement VIVANTE, pas seulement "renseignée" (audit
+            // 2026-08-07 §C1/§F8) : les coordonnées par défaut viennent d'un seul setup et sont
+            // persistées dès le tout premier lancement, donc "calibrée" ne voulait rien dire
+            // quant à savoir si elle regarde le bon endroit. C'est cette distinction qui décide
+            // si la validation des combos est conditionnée ou non.
+            var roi = $"{AppState.Settings.HudRoiWidth}×{AppState.Settings.HudRoiHeight}px à ({AppState.Settings.HudRoiX},{AppState.Settings.HudRoiY})";
+            hudRoiStatus.Text = AppState.HudDamageSource.HasLiveSignal
+                ? $"Zone {roi} — active : un changement y a été détecté récemment, la validation des combos EST conditionnée par les hits."
+                : $"Zone {roi} — inerte : rien n'y a bougé récemment, la validation des combos n'est PAS conditionnée (lance Brawlhalla, ou recalibre si ta résolution diffère).";
         }
         UpdateHudRoiStatus();
         advancedPanel.Children.Add(hudRoiStatus);
@@ -474,6 +512,28 @@ public partial class ControlPanelWindow : Window
         advancedPanel.Children.Add(hudRow);
         advancedPanel.Children.Add(hudEnabledCheck);
 
+        // Sorti en réglage lors de l'audit 2026-08-07 (§F9) : c'est le paramètre du chemin
+        // critique qui a demandé le plus de réajustements en test réel (900 → 400 → 250 → 600 ms),
+        // et il dépend du setup — le figer en constante obligeait à recompiler pour l'ajuster.
+        var hitWindowRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(18, 4, 0, 4) };
+        hitWindowRow.Children.Add(Label("Délai accordé au HUD pour confirmer un coup (ms)"));
+        var hitWindowBox = new TextBox { Text = AppState.Settings.HitConfirmationWindowMs.ToString(), Width = 60 };
+        hitWindowBox.LostFocus += (_, _) =>
+        {
+            if (int.TryParse(hitWindowBox.Text, out var value) && value >= 100 && value <= 3000)
+            {
+                AppState.Settings.HitConfirmationWindowMs = value;
+                AppState.SaveSettings();
+            }
+            else
+            {
+                hitWindowBox.Text = AppState.Settings.HitConfirmationWindowMs.ToString();
+            }
+        };
+        hitWindowRow.Children.Add(hitWindowBox);
+        advancedPanel.Children.Add(hitWindowRow);
+        advancedPanel.Children.Add(HelpText("Entre 100 et 3000 ms (600 par défaut). Trop bas : de vrais coups qui touchent sont invalidés avant que le HUD ait eu le temps de l'afficher. Trop haut : un coup porté dans le vide met plus longtemps à être détecté comme raté."));
+
         // Retour en direct (pas juste au moment d'un vrai hit) : sans ça, la seule façon de
         // vérifier que le calibrage vise la bonne zone était d'attendre un hit en jeu — demande
         // explicite de l'utilisateur. S'abonne à Sampled (levé à chaque capture, changement ou
@@ -481,7 +541,11 @@ public partial class ControlPanelWindow : Window
         var hudLiveText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 12), FontFamily = new FontFamily("Consolas") };
         hudLiveText.Text = AppState.Settings.HudDetectionEnabled ? "En attente d'une lecture…" : "Inactif (coche \"Activer la détection de hit\" pour voir un retour en direct).";
         advancedPanel.Children.Add(hudLiveText);
-        void HudSampledHandler(double ratio) => Dispatcher.Invoke(() => hudLiveText.Text = $"Dernière lecture : {ratio * 100:0.0} % de la zone a changé.");
+        void HudSampledHandler(double ratio) => Dispatcher.Invoke(() =>
+        {
+            hudLiveText.Text = $"Dernière lecture : {ratio * 100:0.0} % de la zone a changé.";
+            UpdateHudRoiStatus(); // l'état actif/inerte évolue tout seul au fil du jeu
+        });
         AppState.HudDamageSource.Sampled += HudSampledHandler;
 
         advancedPanel.Children.Add(HelpText("Palier de dégâts par couleur : lit la couleur de la barre sous l'icône ADVERSAIRE (Blanc/Jaune/Orange/Rouge/Noir, les paliers officiels 0/50/100/150/200%) — aucun réglage de jeu requis, contrairement à la détection de hit ci-dessus."));
@@ -724,13 +788,17 @@ public partial class ControlPanelWindow : Window
             Grid.SetColumn(keysBtn, 2);
             keysBtn.Click += (_, _) =>
             {
-                keysBtn.Content = "…";
-                ListenForNextKeyChord(names =>
-                {
-                    keysBtn.Tag = names;
-                    keysBtn.Content = string.Join(" + ", names);
-                    RecomputeKeyConflicts();
-                });
+                _cancelActiveListen?.Invoke();
+                var original = keysBtn.Content;
+                keysBtn.Content = "… (6s)";
+                ListenForNextKeyChord(
+                    onCaptured: names =>
+                    {
+                        keysBtn.Tag = names;
+                        keysBtn.Content = string.Join(" + ", names);
+                        RecomputeKeyConflicts();
+                    },
+                    onCancelled: () => keysBtn.Content = original);
             };
             row.Children.Add(keysBtn);
 
@@ -739,12 +807,16 @@ public partial class ControlPanelWindow : Window
             Grid.SetColumn(gamepadBtn, 3);
             gamepadBtn.Click += (_, _) =>
             {
-                gamepadBtn.Content = "…";
-                ListenForNextGamepadButton(name =>
-                {
-                    gamepadBtn.Tag = name;
-                    gamepadBtn.Content = name;
-                });
+                _cancelActiveListen?.Invoke();
+                var original = gamepadBtn.Content;
+                gamepadBtn.Content = "… (6s)";
+                ListenForNextGamepadButton(
+                    onCaptured: name =>
+                    {
+                        gamepadBtn.Tag = name;
+                        gamepadBtn.Content = name;
+                    },
+                    onCancelled: () => gamepadBtn.Content = original);
             };
             row.Children.Add(gamepadBtn);
 
@@ -838,22 +910,83 @@ public partial class ControlPanelWindow : Window
         return Wrap(panel);
     }
 
-    private void ListenForNextKey(Action<int> onCaptured)
+    /// <summary>Touches qui ne peuvent pas servir de touche finale à un raccourci Ctrl+Alt+* :
+    /// les modificateurs eux-mêmes. Sans ce filtre, appuyer naturellement sur Ctrl+Alt+X pour
+    /// « taper le raccourci » capturait d'abord Ctrl — le raccourci devenait Ctrl+Alt+Ctrl,
+    /// c'est-à-dire déclenché en permanence dès qu'on tient Ctrl+Alt (audit 2026-08-07 §E4).</summary>
+    private static readonly HashSet<int> ModifierVks = new()
     {
+        0x10, 0xA0, 0xA1, // Shift, LShift, RShift
+        0x11, 0xA2, 0xA3, // Ctrl, LCtrl, RCtrl
+        0x12, 0xA4, 0xA5, // Alt, LAlt, RAlt
+        0x5B, 0x5C,       // LWin, RWin
+    };
+
+    /// <summary>Écoute d'une touche unique, annulable. Retourne l'action d'annulation.
+    ///
+    /// Audit 2026-08-07 §E4 : l'ancienne version s'abonnait au hook global et ne se désabonnait
+    /// qu'au premier appui — sans timeout, sans annulation, sans nettoyage à la fermeture de la
+    /// fenêtre ou au changement d'onglet. Cliquer le bouton puis changer d'avis laissait l'écoute
+    /// armée indéfiniment : la prochaine touche tapée n'importe où (dans le jeu, un navigateur…)
+    /// devenait le raccourci. Le bon patron existait déjà dans le repo
+    /// (ComboEditorWindow.ListenForNextBindAction), il n'était juste pas utilisé ici.</summary>
+    private Action ListenForNextKey(Action<int> onCaptured, Action? onCancelled = null)
+    {
+        var done = false;
+        var timeout = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+
+        void Finish(int vk, bool cancelled)
+        {
+            if (done) return;
+            done = true;
+            timeout.Stop();
+            AppState.Hook.KeyDown -= Handler;
+            AppState.BindingCaptureActive = false;
+            if (cancelled) onCancelled?.Invoke();
+            else onCaptured(vk);
+        }
+
         void Handler(int vk)
         {
-            AppState.Hook.KeyDown -= Handler;
-            Dispatcher.Invoke(() => onCaptured(vk));
+            // Un modificateur seul n'est jamais une touche finale valide : on continue d'écouter
+            // au lieu de le capturer, pour que taper le chord entier fonctionne naturellement.
+            if (ModifierVks.Contains(vk)) return;
+            Dispatcher.Invoke(() => Finish(vk, cancelled: false));
         }
+
+        timeout.Tick += (_, _) => Finish(0, cancelled: true);
+        AppState.BindingCaptureActive = true;
         AppState.Hook.KeyDown += Handler;
+        timeout.Start();
+
+        _cancelActiveListen = () => Finish(0, cancelled: true);
+        return _cancelActiveListen;
     }
+
+    /// <summary>Écoute en cours (touche ou chord), coupée si une autre démarre, si l'onglet
+    /// change ou si la fenêtre se ferme.</summary>
+    private Action? _cancelActiveListen;
 
     // Capture toutes les touches tenues ensemble (chord) jusqu'au premier relâchement, pour
     // pouvoir réassigner en un seul geste un combo comme Shift+Bas (Esquive) plutôt que de
     // ne capturer qu'une touche à la fois.
-    private void ListenForNextKeyChord(Action<List<string>> onCaptured)
+    private void ListenForNextKeyChord(Action<List<string>> onCaptured, Action? onCancelled = null)
     {
         var pressed = new List<int>();
+        var done = false;
+        var timeout = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+
+        void Finish(List<string>? names, bool cancelled)
+        {
+            if (done) return;
+            done = true;
+            timeout.Stop();
+            AppState.Hook.KeyDown -= KeyDownHandler;
+            AppState.Hook.KeyUp -= KeyUpHandler;
+            AppState.BindingCaptureActive = false;
+            if (cancelled) onCancelled?.Invoke();
+            else onCaptured(names!);
+        }
 
         void KeyDownHandler(int vk)
         {
@@ -862,26 +995,50 @@ public partial class ControlPanelWindow : Window
 
         void KeyUpHandler(int vk)
         {
-            AppState.Hook.KeyDown -= KeyDownHandler;
-            AppState.Hook.KeyUp -= KeyUpHandler;
             if (pressed.Count == 0) pressed.Add(vk);
             var names = pressed.Select(v => System.Windows.Input.KeyInterop.KeyFromVirtualKey(v).ToString()).ToList();
-            Dispatcher.Invoke(() => onCaptured(names));
+            Dispatcher.Invoke(() => Finish(names, cancelled: false));
         }
 
+        // Même annulabilité que ListenForNextKey (§E4) : une écoute de chord laissée en plan
+        // capturait sinon, elle aussi, la prochaine touche tapée n'importe où sur le PC.
+        timeout.Tick += (_, _) => Finish(null, cancelled: true);
+        AppState.BindingCaptureActive = true;
         AppState.Hook.KeyDown += KeyDownHandler;
         AppState.Hook.KeyUp += KeyUpHandler;
+        timeout.Start();
+
+        _cancelActiveListen = () => Finish(null, cancelled: true);
     }
 
-    private void ListenForNextGamepadButton(Action<string> onCaptured)
+    private void ListenForNextGamepadButton(Action<string> onCaptured, Action? onCancelled = null)
     {
+        var done = false;
+        var timeout = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+
+        void Finish(string? name, bool cancelled)
+        {
+            if (done) return;
+            done = true;
+            timeout.Stop();
+            AppState.Gamepad.ButtonDown -= Handler;
+            AppState.BindingCaptureActive = false;
+            if (cancelled) onCancelled?.Invoke();
+            else onCaptured(name!);
+        }
+
         void Handler(int syntheticCode)
         {
-            AppState.Gamepad.ButtonDown -= Handler;
             var name = GamepadHook.Buttons.FirstOrDefault(b => GamepadHook.SyntheticCodeBase + b.Flag == syntheticCode).Name;
-            if (name is not null) Dispatcher.Invoke(() => onCaptured(name));
+            if (name is not null) Dispatcher.Invoke(() => Finish(name, cancelled: false));
         }
+
+        timeout.Tick += (_, _) => Finish(null, cancelled: true);
+        AppState.BindingCaptureActive = true;
         AppState.Gamepad.ButtonDown += Handler;
+        timeout.Start();
+
+        _cancelActiveListen = () => Finish(null, cancelled: true);
     }
 
     // ================= Périphériques =================
@@ -1438,18 +1595,42 @@ public partial class ControlPanelWindow : Window
         else if (_combosList.Items.Count > 0) _combosList.SelectedIndex = 0;
     }
 
+    /// <summary>Déplace le combo sélectionné d'un cran dans la liste.
+    ///
+    /// Audit 2026-08-07 §M8 : l'ancienne version se resélectionnait sur `visibleTarget`, une
+    /// position d'AFFICHAGE — or RefreshCombosList réordonne ensuite la liste via
+    /// ComboFamilies.OrderWithFamilies, donc cet index pouvait très bien pointer sur un autre
+    /// combo après coup (le bouton semblait alors ne rien faire, ou sélectionner un combo sans
+    /// rapport). On retrouve désormais le combo déplacé par son Id, et on prévient
+    /// explicitement quand le regroupement par familles annule visuellement le déplacement,
+    /// plutôt que de laisser croire à un bouton cassé.</summary>
     private void MoveSelectedCombo(int direction)
     {
         var visibleIndex = _combosList.SelectedIndex;
         var visibleTarget = visibleIndex + direction;
-        if (visibleIndex < 0 || visibleTarget < 0 || visibleTarget >= _visibleComboIndices.Count) return;
+        if (visibleIndex < 0 || visibleIndex >= _visibleComboIndices.Count) return;
+        if (visibleTarget < 0 || visibleTarget >= _visibleComboIndices.Count) return;
 
         var absIndex = _visibleComboIndices[visibleIndex];
         var absTarget = _visibleComboIndices[visibleTarget];
+        var movedId = AppState.Combos[absIndex].Id;
+
         (AppState.Combos[absIndex], AppState.Combos[absTarget]) = (AppState.Combos[absTarget], AppState.Combos[absIndex]);
         AppState.NotifyCombosMutated();
         RefreshCombosList();
-        _combosList.SelectedIndex = visibleTarget;
+
+        var newVisible = _visibleComboIndices.FindIndex(i => AppState.Combos[i].Id == movedId);
+        if (newVisible >= 0) _combosList.SelectedIndex = newVisible;
+
+        if (newVisible == visibleIndex)
+        {
+            MessageBox.Show(
+                "Ce combo fait partie d'une famille (il étend un combo plus court, ou est étendu par un plus long) : "
+                + "les membres d'une famille sont toujours affichés groupés et triés par nombre d'étapes, "
+                + "donc le tri automatique a repris le dessus sur ce déplacement.\n\n"
+                + "L'ordre a bien changé dans le fichier, il n'est simplement pas visible ici.",
+                "Déplacement annulé par le regroupement", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     }
 
     private void OpenComboEditor(Combo? existing)

@@ -28,7 +28,6 @@ public partial class ComboEditorWindow : Window
     private TextBox _nameBox = null!;
     private TextBox _descriptionBox = null!;
     private TextBox _toleranceBox = null!;
-    private ComboBox _matchModeCombo = null!;
     private ComboBox _weaponCombo = null!;
     private ComboBox _legendCombo = null!;
     private TextBox _damageNoteBox = null!;
@@ -123,18 +122,19 @@ public partial class ComboEditorWindow : Window
             Margin = new Thickness(6, 0, 20, 0),
             ToolTip = "Purement indicatif : n'affecte plus la réussite/l'échec du combo (seule une mauvaise touche fait échouer), sert uniquement à régler la vitesse de la barre de tolérance visuelle affichée en jeu.",
         };
+        // Le TextBox était créé, mémorisé dans le champ et relu à la sauvegarde, mais JAMAIS
+        // ajouté à toleranceRow — donc invisible à l'écran, et sa valeur impossible à changer
+        // (audit 2026-08-07 §M4). Il ne restait qu'un label seul.
         toleranceRow.Children.Add(_toleranceBox);
-        toleranceRow.Children.Add(FieldLabel("Mode", inline: true));
-        _matchModeCombo = new ComboBox
-        {
-            Width = 160,
-            Margin = new Thickness(6, 0, 0, 0),
-            ItemsSource = new[] { "Refuser les directions en trop", "Les ignorer (mouvement libre)" },
-            SelectedIndex = _existing?.MatchMode == MatchMode.IgnoreExtraneous ? 1 : 0,
-            ToolTip = "Refuser les directions en trop : une direction tenue en plus de ce que demande l'étape (non demandée) fait échouer le combo. Les ignorer : ce mouvement pur hors combo n'est pas compté comme une faute.",
-        };
-        toleranceRow.Children.Add(_matchModeCombo);
         root.Children.Add(toleranceRow);
+        root.Children.Add(new TextBlock
+        {
+            Text = "Le mouvement (direction, Saut, Esquive/Dash) entre les coups est toujours autorisé, quoi qu'il arrive — seule une mauvaise Att. légère/Att. forte/Lancer fait échouer une étape. La confirmation de hit HUD (si calibrée) vérifie de toute façon que le combo touche vraiment.",
+            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
 
         root.Children.Add(FieldLabel("Limite de % de dégâts (optionnel, ex. \"true combo jusqu'à ~40%\")"));
         _damageNoteBox = new TextBox { Text = _existing?.DamageNote ?? "", Margin = new Thickness(0, 0, 0, 2) };
@@ -163,7 +163,6 @@ public partial class ComboEditorWindow : Window
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
-        stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         var maxHeader = new TextBlock { Text = "Max (indicatif)", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), TextWrapping = TextWrapping.Wrap };
         Grid.SetColumn(maxHeader, 1);
@@ -215,7 +214,6 @@ public partial class ComboEditorWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
 
         // Liste mutable des actions de cette étape, alimentée uniquement par des
@@ -287,18 +285,8 @@ public partial class ComboEditorWindow : Window
         Grid.SetColumn(minBox, 2);
         row.Children.Add(minBox);
 
-        var freeMovementBox = new CheckBox
-        {
-            IsChecked = step?.FreeMovement ?? false,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            ToolTip = "Tolère n'importe quelle direction tenue en plus sur cette étape, même avec « Refuser les directions en trop » (ex. un coup qui demande de se décaler pour toucher la hitbox)",
-        };
-        Grid.SetColumn(freeMovementBox, 3);
-        row.Children.Add(freeMovementBox);
-
         var removeBtn = new Button { Content = "✕", Margin = new Thickness(2) };
-        Grid.SetColumn(removeBtn, 4);
+        Grid.SetColumn(removeBtn, 3);
         removeBtn.Click += (_, _) => _stepsPanel.Children.Remove(row);
         row.Children.Add(removeBtn);
 
@@ -332,6 +320,7 @@ public partial class ComboEditorWindow : Window
             timeout.Stop();
             AppState.Hook.KeyDown -= OnKey;
             AppState.Gamepad.ButtonDown -= OnKey;
+            AppState.BindingCaptureActive = false;
         }
 
         void Finish(string? action, bool cancelled)
@@ -344,6 +333,9 @@ public partial class ComboEditorWindow : Window
         }
 
         timeout.Tick += (_, _) => Finish(null, cancelled: true);
+        // Empêche l'appui servant à choisir la touche d'être AUSSI joué comme un coup par
+        // l'overlay en cours (audit 2026-08-07 §F7).
+        AppState.BindingCaptureActive = true;
         AppState.Hook.KeyDown += OnKey;
         AppState.Gamepad.ButtonDown += OnKey;
         timeout.Start();
@@ -364,7 +356,6 @@ public partial class ComboEditorWindow : Window
 
             var maxBox = (TextBox)row.Children[1];
             var minBox = (TextBox)row.Children[2];
-            var freeMovementBox = (CheckBox)row.Children[3];
 
             // Les puces ne peuvent contenir que des actions réellement existantes
             // (ListenForNextBindAction les résout via KeyBind.VirtualKeyCodes), donc
@@ -386,7 +377,6 @@ public partial class ComboEditorWindow : Window
                 RequiredActions = new List<string>(actions),
                 MaxDelayMs = isFirstStep ? null : (int.TryParse(maxBox.Text, out var max) ? max : null),
                 MinDelayMs = isFirstStep ? null : (int.TryParse(minBox.Text, out var min) ? min : null),
-                FreeMovement = freeMovementBox.IsChecked ?? false,
             });
         }
 
@@ -418,12 +408,22 @@ public partial class ComboEditorWindow : Window
             Legend = _legendCombo.SelectedItem as string == "(aucun)" ? "" : (_legendCombo.SelectedItem as string ?? ""),
             Steps = steps,
             DefaultToleranceMs = tolerance,
-            MatchMode = _matchModeCombo.SelectedIndex == 1 ? MatchMode.IgnoreExtraneous : MatchMode.Strict,
+            // MatchMode n'est plus lu par ComboRunner.Feed depuis que le mouvement en trop n'est
+            // jamais fautif : on recopie la valeur existante pour ne pas casser la
+            // désérialisation d'un vieux combos.json, mais on ne "choisit" plus une valeur pour
+            // un combo neuf — ça laissait croire à une sémantique qui n'existe plus (audit
+            // 2026-08-07 §F5).
+            MatchMode = _existing?.MatchMode ?? default,
             DamageNote = _damageNoteBox.Text.Trim(),
             BestStreak = _existing?.BestStreak ?? 0,
             TotalCompletions = _existing?.TotalCompletions ?? 0,
             TotalAttempts = _existing?.TotalAttempts ?? 0,
             Mastered = _existing?.Mastered ?? false,
+            // Marque le combo comme appartenant désormais à l'utilisateur : s'il s'agit d'un
+            // preset, AppState.UpsertPreset cessera de réécrire son contenu à chaque démarrage
+            // (audit 2026-08-07 §M5 — toute modification d'un preset était sinon annulée au
+            // lancement suivant, sans avertissement).
+            UserModified = _existing is not null,
         };
 
         DialogResult = true;

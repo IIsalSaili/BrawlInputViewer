@@ -4,11 +4,12 @@ using System.Collections.Generic;
 namespace BrawlhallaOverlay;
 
 /// <summary>
-/// How ComboRunner treats an input that doesn't match the current step.
-/// Both modes are implemented (see ComboRunner.Feed): in Strict, a direction
-/// held in addition to what the step requires is treated as a wrong input
-/// (reset). In IgnoreExtraneous, pure-movement noise held in addition to the
-/// required actions is ignored instead of failing the combo.
+/// Ancien réglage : Strict cassait le combo si une direction en trop était tenue,
+/// IgnoreExtraneous la tolérait. <b>N'a plus aucun effet</b> — ComboRunner.Feed ne
+/// lit plus ce champ depuis que le mouvement/Saut/Esquive en trop entre deux
+/// étapes n'est plus jamais fautif (seule une mauvaise Att. légère/Att. forte/
+/// Lancer casse une tentative, voir docstring de ComboRunner). Gardé uniquement
+/// pour ne pas casser la désérialisation d'un combos.json existant.
 /// </summary>
 public enum MatchMode
 {
@@ -61,4 +62,15 @@ public sealed class Combo
     public int TotalCompletions { get; set; }
     public int TotalAttempts { get; set; }
     public bool Mastered { get; set; }
+
+    /// <summary>Vrai si l'utilisateur a modifié ce combo à la main dans l'éditeur. Ne concerne
+    /// que les combos préréglés (Id "preset-…") : AppState.UpsertPreset cesse alors de réécrire
+    /// leur contenu au démarrage.
+    ///
+    /// Audit 2026-08-07 §M5 : l'éditeur conserve l'Id d'origine, et le constructeur statique
+    /// d'AppState réimporte tous les presets à chaque lancement — donc renommer un preset,
+    /// retirer une étape parasite ou lui assigner une arme était systématiquement annulé au
+    /// redémarrage suivant, sans le moindre avertissement. Ces combos étaient "en lecture seule
+    /// de fait" sans que rien ne le dise.</summary>
+    public bool UserModified { get; set; }
 }

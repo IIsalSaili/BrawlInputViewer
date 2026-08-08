@@ -109,7 +109,19 @@ public static class ComboFamilies
 
         // Départage des combos de même niveau (siblings) par ordre d'apparition d'origine,
         // pas par Id, pour rester stable visuellement d'un rafraîchissement à l'autre.
-        var originalOrder = combos.Select((c, i) => (c.Id, i)).ToDictionary(t => t.Id, t => t.i);
+        //
+        // Construction défensive plutôt qu'un ToDictionary (audit 2026-08-07 §M6) : celui-ci
+        // lève ArgumentException sur une clé en double, et rien ne garantissait l'unicité des Id
+        // (combos.json édité à la main, import de profil complet qui réinjecte une liste sans
+        // dédoublonner). Ce n'était pas un affichage dégradé mais une exception non gérée qui
+        // cassait tout l'affichage des listes de combos, panneau de contrôle ET Dashboard.
+        // AppState.DeduplicateComboIds corrige désormais la cause au chargement ; ceci reste le
+        // filet de sécurité pour une liste construite en mémoire.
+        var originalOrder = new Dictionary<string, int>();
+        for (var i = 0; i < combos.Count; i++)
+        {
+            if (!originalOrder.ContainsKey(combos[i].Id)) originalOrder[combos[i].Id] = i;
+        }
         foreach (var family in familiesByRootId.Values)
         {
             family.MembersByLevel.Sort((a, b) =>

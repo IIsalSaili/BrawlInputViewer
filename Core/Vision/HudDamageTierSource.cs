@@ -1,5 +1,5 @@
 using System;
-using System.Windows.Threading;
+using System.Threading;
 
 namespace BrawlhallaOverlay;
 
@@ -42,7 +42,11 @@ public sealed class HudDamageTierSource : IDisposable
     // qui évite le chiffre (une portion de couleur pure), pas seulement de remonter ce seuil.
     private const int ChangeThreshold = 45;
 
-    private readonly DispatcherTimer _timer;
+    // Thread de pool plutôt que DispatcherTimer, même raison que HudDamageSource (audit
+    // 2026-08-07 §M2) : la capture GDI n'a aucun besoin du thread UI, et c'est ce thread-là qui
+    // sert le hook clavier bas niveau.
+    private readonly Timer _timer;
+    private int _polling;
     private DamageTier _currentTier = DamageTier.White;
     private (int R, int G, int B) _stableColor;
     private DamageTier? _pendingTier;
@@ -61,8 +65,7 @@ public sealed class HudDamageTierSource : IDisposable
 
     public HudDamageTierSource()
     {
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollIntervalMs) };
-        _timer.Tick += (_, _) => Poll();
+        _timer = new Timer(_ => Poll(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     public void Start(int x, int y, int width, int height)
@@ -75,17 +78,24 @@ public sealed class HudDamageTierSource : IDisposable
         _pendingTier = null;
         _pendingCount = 0;
         _initialized = false;
-        _timer.Start();
+        _timer.Change(PollIntervalMs, PollIntervalMs);
     }
 
     public void Stop()
     {
-        _timer.Stop();
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
     private int _roiX, _roiY, _roiWidth, _roiHeight;
 
     private void Poll()
+    {
+        if (Interlocked.Exchange(ref _polling, 1) == 1) return;
+        try { PollCore(); }
+        finally { Interlocked.Exchange(ref _polling, 0); }
+    }
+
+    private void PollCore()
     {
         var frame = ScreenRegionCapture.Capture(_roiX, _roiY, _roiWidth, _roiHeight);
         if (frame is null || frame.Length < 3) return;
@@ -207,5 +217,9 @@ public sealed class HudDamageTierSource : IDisposable
         return null;
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        Stop();
+        _timer.Dispose();
+    }
 }

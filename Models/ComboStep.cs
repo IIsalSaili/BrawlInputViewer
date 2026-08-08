@@ -18,10 +18,9 @@ public sealed class ComboStep
     /// <summary>Min delay (ms) after the previous step succeeded. Null = no minimum.</summary>
     public int? MinDelayMs { get; set; }
 
-    /// <summary>Si vrai, cette étape tolère n'importe quelle direction tenue en plus
-    /// de ce qui est requis, même en MatchMode.Strict (ex. un coup qui demande de se
-    /// décaler pour toucher la hitbox, sans que ce décalage fasse partie du combo
-    /// lui-même). Sans effet en IgnoreExtraneous, qui tolère déjà tout excédent de
-    /// mouvement sur toutes les étapes.</summary>
+    /// <summary><b>N'a plus aucun effet</b> — ComboRunner.Feed tolère maintenant
+    /// toujours un excédent de mouvement, quelle que soit l'étape (voir docstring de
+    /// ComboRunner). Gardé uniquement pour ne pas casser la désérialisation d'un
+    /// combos.json existant.</summary>
     public bool FreeMovement { get; set; }
 }

@@ -196,12 +196,17 @@ public partial class MainWindow : Window
     private static readonly SolidColorBrush IconBrushSuccess = new((Color)ColorConverter.ConvertFromString("#55D98B"));
     private static readonly SolidColorBrush IconBrushFail = new((Color)ColorConverter.ConvertFromString("#E4574C"));
     private static readonly SolidColorBrush IconBrushHitPending = new((Color)ColorConverter.ConvertFromString("#F0A030"));
+    // "slow" = bonnes touches mais délai maximum entre deux coups dépassé (ComboFailReason.Timeout).
+    // Teinte distincte du rouge (mauvaise touche) ET de l'orange (hit non confirmé) pour que les
+    // trois causes d'échec se lisent d'un coup d'œil — voir audit 2026-08-07 §M10.
+    private static readonly SolidColorBrush IconBrushTooSlow = new((Color)ColorConverter.ConvertFromString("#7FA6FF"));
 
     private static Brush IconBrushForVariant(string variant) => variant switch
     {
         "green" => IconBrushSuccess,
         "red" => IconBrushFail,
         "orange" => IconBrushHitPending,
+        "slow" => IconBrushTooSlow,
         _ => IconBrushDefault,
     };
 
@@ -210,9 +215,16 @@ public partial class MainWindow : Window
     private DispatcherTimer? _chainComboTimer;
     private DispatcherTimer? _toleranceCountdownTimer;
     private DispatcherTimer? _comboCompletedResetTimer;
-    private DispatcherTimer? _comboAbandonPollTimer;
-    private static readonly TimeSpan ComboAbandonTimeout = TimeSpan.FromSeconds(3);
+    // Renommé depuis _comboAbandonPollTimer (audit 2026-08-07 §F10) : le mécanisme n'est plus un
+    // "abandon" silencieux depuis longtemps, c'est un échec explicite (StepFailed + reset de
+    // série) — voir ComboRunner.CheckMoveTimeout.
+    private DispatcherTimer? _comboMoveTimeoutPollTimer;
+    // Demande explicite de l'utilisateur : au-delà de ce délai entre deux coups, la
+    // tentative est forcément foirée, même si le joueur arrive à reprendre le combo
+    // ensuite depuis le début — voir ComboRunner.CheckMoveTimeout.
+    private static readonly TimeSpan ComboMoveTimeout = TimeSpan.FromSeconds(2.5);
     private DispatcherTimer? _hitConfirmationPollTimer;
+    private DispatcherTimer? _saveFlushTimer;
 
     // --- Estompage après inactivité (voir docs/amelioration.md piste #8) ---
     private DispatcherTimer? _autoHideCheckTimer;
@@ -258,6 +270,11 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         RebuildBindMaps();
+        // Positionne/dimensionne la fenêtre AVANT son premier affichage (audit 2026-08-07 §F6) :
+        // ApplyWorkArea n'était appelé que dans MainWindow_Loaded, donc l'overlay était brièvement
+        // visible en (0,0) à la taille par défaut avant de sauter à sa vraie place. Ne dépend pas
+        // du handle natif (contrairement à ApplyClickThrough), donc appelable dès ici.
+        ApplyWorkArea();
         BuildLayout();
 
         AppState.LockChanged += OnLockChanged;
@@ -268,19 +285,38 @@ public partial class MainWindow : Window
         AppState.RecordingChanged += OnRecordingChanged;
         AppState.OverlayHiddenChanged += OnOverlayHiddenChanged;
 
+        // Abonnements aux sources partagées posés ICI, une seule fois, et plus dans BuildLayout()
+        // (audit 2026-08-07 §E6) : BuildLayout est aussi appelé à chaque BindsChanged, donc
+        // chaque enregistrement de touches ajoutait un abonnement de plus à
+        // CaptureSuspendedChanged / HudTierSource.Sampled / HudDamageSource.Sampled sans jamais
+        // en retirer — après N sauvegardes, chaque échantillon HUD déclenchait N Dispatcher.Invoke
+        // sur des TextBlock orphelins qui n'étaient même plus dans l'arbre visuel.
+        AppState.CaptureSuspendedChanged += OnCaptureSuspendedChanged;
+        AppState.HudTierSource.Sampled += OnHudTierSampled;
+        AppState.HudDamageSource.Sampled += OnHudRatioSampled;
+
         Loaded += MainWindow_Loaded;
         Closed += (_, _) =>
         {
             AppState.Hook.KeyDown -= OnGlobalKeyDown;
             AppState.Hook.KeyUp -= OnGlobalKeyUp;
-            AppState.Hook.Dispose();
             AppState.Gamepad.ButtonDown -= OnGlobalKeyDown;
             AppState.Gamepad.ButtonUp -= OnGlobalKeyUp;
-            AppState.Gamepad.Dispose();
+            // Les hooks sont des singletons partagés (AppState.Hook/Gamepad) : ParcoursWindow et
+            // ComboEditorWindow s'appuient sur les mêmes instances. Les Dispose ici coupait
+            // silencieusement la capture d'une ParcoursWindow encore ouverte (audit 2026-08-07
+            // §M16) — c'est à App.OnExit, qui possède réellement le cycle de vie, de le faire.
             AppState.QuizRevealRequested -= RevealQuizStepsTemporarily;
             AppState.OverlayHiddenChanged -= OnOverlayHiddenChanged;
+            AppState.CaptureSuspendedChanged -= OnCaptureSuspendedChanged;
+            AppState.HudTierSource.Sampled -= OnHudTierSampled;
+            AppState.HudDamageSource.Sampled -= OnHudRatioSampled;
+            AppState.HudDamageSource.HitDetected -= OnHudHitDetected;
+            AppState.HudTierSource.TierChanged -= OnHudTierChanged;
+            AppState.FlushPendingSaves();
             if (_trayIcon is not null) _trayIcon.Visible = false;
             _trayIcon?.Dispose();
+            if (_trayIconHandle != IntPtr.Zero) { DestroyIcon(_trayIconHandle); _trayIconHandle = IntPtr.Zero; }
             _dashboard?.Close();
             _controlBar?.Close();
         };
@@ -346,7 +382,6 @@ public partial class MainWindow : Window
         };
         Canvas.SetTop(_suspendedBadge, 40);
         RootCanvas.Children.Add(_suspendedBadge);
-        AppState.CaptureSuspendedChanged += OnCaptureSuspendedChanged;
 
         _hudTierSwatchOverlay = new Border { Width = 14, Height = 14, Margin = new Thickness(0, 0, 6, 0), BorderBrush = Brushes.White, BorderThickness = new Thickness(1), Background = Brushes.Transparent };
         _hudTierIndicatorText = new TextBlock { Foreground = Brushes.White, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
@@ -374,9 +409,6 @@ public partial class MainWindow : Window
         Canvas.SetLeft(_hudHitIndicatorText, 10);
         Canvas.SetTop(_hudHitIndicatorText, 116);
         RootCanvas.Children.Add(_hudHitIndicatorText);
-
-        AppState.HudTierSource.Sampled += OnHudTierSampled;
-        AppState.HudDamageSource.Sampled += OnHudRatioSampled;
 
         ApplyScale();
         SetActiveComboRunner();
@@ -719,7 +751,13 @@ public partial class MainWindow : Window
 
         var combo = combos[activeIndex];
         var (filteredPos, filteredCount) = AppState.ActiveComboFilteredPosition();
-        _comboNameText.Text = $"{combo.Name}  ({filteredPos + 1}/{filteredCount})";
+        // filteredPos vaut -1 quand le combo actif n'appartient pas à la liste filtrée courante
+        // (ex. après un changement de personnage). L'ancien affichage donnait alors « (0/N) »,
+        // une position qui n'existe pas, sans dire que ce combo n'est pas dans la liste cyclée
+        // par Ctrl+Alt+K (audit 2026-08-07 §M11).
+        _comboNameText.Text = filteredPos >= 0
+            ? $"{combo.Name}  ({filteredPos + 1}/{filteredCount})"
+            : $"{combo.Name}  (hors filtre — pas dans le cycle)";
         _comboStreakText.Text = $"Série : {_comboRunner?.Streak ?? 0}";
 
         UpdateLegendPortrait();
@@ -1059,7 +1097,6 @@ public partial class MainWindow : Window
             _comboRunner.StepFailed -= OnComboStepFailed;
             _comboRunner.ComboCompleted -= OnComboCompleted;
             _comboRunner.ComboReset -= OnComboReset;
-            _comboRunner.ComboAbandoned -= OnComboAbandoned;
             _comboRunner.ComboAwaitingHitConfirmation -= OnComboAwaitingHitConfirmation;
             _comboRunner.HitNotConfirmed -= OnComboHitNotConfirmed;
         }
@@ -1076,10 +1113,9 @@ public partial class MainWindow : Window
             _comboRunner.StepFailed += OnComboStepFailed;
             _comboRunner.ComboCompleted += OnComboCompleted;
             _comboRunner.ComboReset += OnComboReset;
-            _comboRunner.ComboAbandoned += OnComboAbandoned;
             _comboRunner.ComboAwaitingHitConfirmation += OnComboAwaitingHitConfirmation;
             _comboRunner.HitNotConfirmed += OnComboHitNotConfirmed;
-            _comboRunner.RequireHitConfirmation = ShouldRequireHitConfirmation();
+            ApplyHitConfirmationGate();
         }
 
         RenderComboSteps();
@@ -1112,10 +1148,19 @@ public partial class MainWindow : Window
             if (AppState.Settings.SoundEnabled) SystemSounds.Hand.Play();
 
             var actions = _comboRunner?.Combo.Steps[index].RequiredActions ?? new List<string>();
-            AppState.RecordStepResult(actions, success: false);
 
-            ExplainFirstComboFailIfNeeded(actions);
-            FlashAllSteps("red");
+            // Une tentative coupée par le délai maximum entre deux coups n'est PAS une faute de
+            // précision : les touches jouées étaient justes, le joueur a simplement été trop
+            // lent. La compter comme un échec par action polluait les stats de précision avec
+            // des actions que le joueur n'avait pas ratées (audit 2026-08-07 §M9).
+            if (reason == ComboFailReason.WrongInput) AppState.RecordStepResult(actions, success: false);
+
+            ExplainFirstComboFailIfNeeded(actions, reason);
+
+            // Rouge = mauvaise touche, bleu = trop lent. ComboFailReason était documenté depuis
+            // le début comme permettant à l'UI de distinguer les deux causes, mais `reason`
+            // n'était jamais lu ici : les deux flashaient en rouge (audit 2026-08-07 §M10).
+            FlashAllSteps(reason == ComboFailReason.Timeout ? "slow" : "red");
         });
     }
 
@@ -1123,7 +1168,7 @@ public partial class MainWindow : Window
     /// dans la session, affiche une ligne explicite (§5.6 du plan UX onboarding) plutôt que de
     /// laisser deviner. Une seule fois : une fois le mécanisme compris, répéter le message à
     /// chaque échec ajouterait juste du bruit.</summary>
-    private void ExplainFirstComboFailIfNeeded(List<string> expectedActions)
+    private void ExplainFirstComboFailIfNeeded(List<string> expectedActions, ComboFailReason reason)
     {
         if (_hasExplainedFirstComboFail) return;
         _hasExplainedFirstComboFail = true;
@@ -1131,7 +1176,13 @@ public partial class MainWindow : Window
         var expected = expectedActions.Count > 0 ? string.Join(" + ", expectedActions) : "?";
         var actual = _lastFedActionNames.Count > 0 ? string.Join(" + ", _lastFedActionNames) : "(rien)";
 
-        _firstFailExplainText.Text = $"Mauvaise touche : tu as fait « {actual} », l'étape demandait « {expected} ».";
+        // Le message ignorait `reason` et accusait toujours une « mauvaise touche », y compris
+        // quand l'échec venait du délai maximum entre deux coups — le seul message pédagogique de
+        // l'app donnait alors le mauvais diagnostic, et une seule fois par session (audit
+        // 2026-08-07 §M9).
+        _firstFailExplainText.Text = reason == ComboFailReason.Timeout
+            ? $"Trop lent : plus de {ComboMoveTimeout.TotalSeconds:0.#}s sans enchaîner. Tes touches étaient bonnes — l'étape suivante attendait « {expected} »."
+            : $"Mauvaise touche : tu as fait « {actual} », l'étape demandait « {expected} ».";
         _firstFailExplainText.Visibility = Visibility.Visible;
 
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
@@ -1152,19 +1203,27 @@ public partial class MainWindow : Window
             HideAllToleranceBars();
             var streak = _comboRunner?.Streak ?? 0;
             _comboStreakText.Text = $"Série réussie : {streak}";
-            UpdateComboStepVisuals();
 
-            // Reste tout vert 1s après une réussite (ComboRunner.Feed remet déjà
-            // CurrentStepIndex à 0 en interne juste après avoir levé cet event, donc
-            // rien ne raffiche l'état "en attente" tant qu'aucun nouvel input n'arrive) :
-            // si on rejoue la 1ère étape entre-temps, StepSucceeded rafraîchit l'affichage
-            // immédiatement de toute façon, ce timer sert juste de filet en cas d'inaction.
+            // Toutes les pastilles en vert pendant 1s pour matérialiser la réussite, PUIS retour
+            // à l'état d'attente. L'ancien code appelait UpdateComboStepVisuals() tout de suite :
+            // comme ComboRunner.Feed remet CurrentStepIndex à 0 AVANT de lever cet event, ça
+            // repeignait immédiatement tout en "à venir" et le timer d'1s ne faisait que répéter
+            // un état déjà appliqué. La seule confirmation visuelle d'une réussite était donc un
+            // flash de 120 ms sur la dernière pastille (audit 2026-08-07 §M12).
+            SetAllPillIconVariant("green");
+            foreach (var child in _comboStepsPanel.Children)
+            {
+                if (child is StackPanel col && col.Children.Count > 0 && col.Children[0] is Grid p) p.Opacity = 1.0;
+            }
+
             _comboCompletedResetTimer?.Stop();
             _comboCompletedResetTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _comboCompletedResetTimer.Tick += (_, _) =>
             {
                 _comboCompletedResetTimer!.Stop();
-                UpdateComboStepVisuals();
+                // Si le joueur a déjà relancé le combo entre-temps, StepSucceeded a rafraîchi
+                // l'affichage : ne pas écraser une tentative en cours.
+                if ((_comboRunner?.CurrentStepIndex ?? 0) == 0) UpdateComboStepVisuals();
             };
             _comboCompletedResetTimer.Start();
 
@@ -1215,29 +1274,6 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
-
-            var combo = _comboRunner?.Combo;
-            if (combo is not null)
-            {
-                combo.TotalAttempts++;
-                AppState.SaveCombosQuiet();
-            }
-        });
-    }
-
-    // Contrairement à OnComboReset (déclenché par une mauvaise touche, dont l'affichage
-    // est remis à zéro par FlashAllStepsRed une fois son clignotement terminé — voir le
-    // commentaire au-dessus d'OnComboReset), un abandon par inactivité n'a aucune
-    // animation de faute à attendre : on remet l'affichage à l'état d'attente ici, tout
-    // de suite, sans flash rouge ni son (ce n'est pas une faute de frappe, juste un
-    // "il a arrêté").
-    private void OnComboAbandoned()
-    {
-        Dispatcher.Invoke(() =>
-        {
-            HideAllToleranceBars();
-            UpdateComboStepVisuals();
             _comboStreakText.Text = $"Série réussie : {_comboRunner?.Streak ?? 0}";
 
             var combo = _comboRunner?.Combo;
@@ -1318,21 +1354,34 @@ public partial class MainWindow : Window
         };
 
         // Poll indépendant du clavier (contrairement à _comboTimer, jamais redémarré à
-        // chaque appui) : c'est justement l'absence d'appui qu'on veut détecter, pour
-        // abandonner un combo en cours si le joueur ne l'a pas poursuivi depuis
-        // ComboAbandonTimeout (voir ComboRunner.CheckAbandon).
-        _comboAbandonPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        _comboAbandonPollTimer.Tick += (_, _) => _comboRunner?.CheckAbandon(DateTime.UtcNow, ComboAbandonTimeout);
-        _comboAbandonPollTimer.Start();
+        // chaque appui) : c'est justement l'absence de progression qu'on veut détecter,
+        // pour invalider une tentative en cours si le joueur n'a pas enchaîné le coup
+        // suivant depuis ComboMoveTimeout (voir ComboRunner.CheckMoveTimeout).
+        _comboMoveTimeoutPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _comboMoveTimeoutPollTimer.Tick += (_, _) => _comboRunner?.CheckMoveTimeout(DateTime.UtcNow, ComboMoveTimeout);
+        _comboMoveTimeoutPollTimer.Start();
 
-        // Poll dédié, plus fréquent que _comboAbandonPollTimer ci-dessus : la fenêtre de
-        // confirmation de hit (ComboRunner.HitConfirmationWindow) est volontairement très
-        // courte (250ms, resserrée deux fois sur retour utilisateur) — un poll plus lent
-        // grignoterait une bonne partie de cette fenêtre en délai de détection pur, en plus
-        // du délai déjà inhérent au polling HudDamageSource lui-même (60ms).
+        // Poll dédié, plus fréquent que _comboMoveTimeoutPollTimer ci-dessus : la fenêtre de
+        // confirmation de hit (ComboRunner.HitConfirmationWindow, 600 ms par défaut et désormais
+        // réglable — voir Settings.HitConfirmationWindowMs) est courte, et un poll lent
+        // grignoterait une partie de cette fenêtre en délai de détection pur, en plus du délai
+        // déjà inhérent au polling HudDamageSource lui-même (60 ms).
+        // Réévalue aussi le gate à chaque tick : HasLiveSignal évolue tout seul au fil du jeu
+        // (le jeu se ferme, on alt-tab, la zone redevient vivante) — voir §C1.
         _hitConfirmationPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
-        _hitConfirmationPollTimer.Tick += (_, _) => _comboRunner?.CheckHitConfirmationTimeout(DateTime.UtcNow);
+        _hitConfirmationPollTimer.Tick += (_, _) =>
+        {
+            ApplyHitConfirmationGate();
+            _comboRunner?.CheckHitConfirmationTimeout(DateTime.UtcNow);
+        };
         _hitConfirmationPollTimer.Start();
+
+        // Flush périodique des compteurs différés (voir AppState.SaveCombosQuiet/§M3) : les
+        // écritures disque ne sont plus faites à chaque coup joué, mais il ne faut pas non plus
+        // attendre la fermeture de l'app pour les persister.
+        _saveFlushTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _saveFlushTimer.Tick += (_, _) => AppState.FlushPendingSaves();
+        _saveFlushTimer.Start();
 
         // Poll indépendant lui aussi (voir _comboAbandonPollTimer ci-dessus pour le même
         // raisonnement) : estompe le panneau après AutoHideIdleSeconds sans input, si activé
@@ -1459,7 +1508,9 @@ public partial class MainWindow : Window
     /// <summary>Icône de tray à partir du logo de l'app (Assets/AppLogo.png, voir le .csproj) —
     /// remplace l'ancien "B" dessiné au runtime. Redimensionné en 32×32 ici (System.Drawing.Bitmap,
     /// pas BitmapImage WPF, puisque NotifyIcon attend un System.Drawing.Icon).</summary>
-    private static System.Drawing.Icon CreateTrayIcon()
+    private IntPtr _trayIconHandle;
+
+    private System.Drawing.Icon CreateTrayIcon()
     {
         const int size = 32;
         using var stream = System.Windows.Application.GetResourceStream(
@@ -1474,9 +1525,15 @@ public partial class MainWindow : Window
             g.DrawImage(source, 0, 0, size, size);
         }
 
-        var hIcon = bmp.GetHicon();
-        return System.Drawing.Icon.FromHandle(hIcon);
+        // GetHicon alloue un HICON natif dont Icon.FromHandle ne prend PAS la propriété : sans
+        // DestroyIcon explicite, le handle fuit (audit 2026-08-07 §M17). On le mémorise pour le
+        // libérer à la fermeture, en même temps que le NotifyIcon.
+        _trayIconHandle = bmp.GetHicon();
+        return System.Drawing.Icon.FromHandle(_trayIconHandle);
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 
     // Nom affiché d'une touche reconfigurable (ComboNextVk/ComboPrevVk) — reflète le VK réellement
     // configuré au lieu d'un texte "Ctrl+Alt+K" figé, qui mentirait dès qu'un utilisateur réassigne
@@ -1531,7 +1588,7 @@ public partial class MainWindow : Window
     /// docs/amelioration.md piste #8) le panneau du mode Tutoriel après un délai sans input, pour
     /// ne pas polluer l'écran pendant les phases sans combat. Poll indépendant du clavier
     /// (_autoHideCheckTimer), pas d'event : rien ne se déclenche à l'appui, c'est justement
-    /// l'absence d'appui qu'on veut détecter — même raisonnement que CheckAbandon côté ComboRunner.</summary>
+    /// l'absence d'appui qu'on veut détecter — même raisonnement que CheckMoveTimeout côté ComboRunner.</summary>
     private void CheckAutoHideIdle()
     {
         if (!AppState.Settings.AutoHideEnabled || _autoHidden) return;
@@ -1547,6 +1604,29 @@ public partial class MainWindow : Window
         _mode3Panel.BeginAnimation(OpacityProperty, new DoubleAnimation(_mode3Panel.Opacity, 1.0, TimeSpan.FromMilliseconds(150)));
     }
 
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    /// <summary>Relit l'état réel des modificateurs auprès de Windows au lieu de se fier au
+    /// suivi incrémental _ctrlDown/_altDown.
+    ///
+    /// Audit 2026-08-07 §M18 : ces deux drapeaux n'étaient remis à faux que par un KeyUp
+    /// effectivement reçu. Un Alt+Tab, un changement de session ou un KeyUp avalé par une autre
+    /// application les laissait bloqués à true — après quoi appuyer simplement sur K, O, M ou H
+    /// (toutes des touches parfaitement plausibles en jeu) déclenchait le raccourci global
+    /// correspondant. Resynchroniser au moment du test élimine la classe entière de bugs.</summary>
+    private static bool IsModifierHeld(Func<int, bool> isModifier, params int[] vks)
+    {
+        foreach (var vk in vks)
+        {
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0) return true;
+        }
+        return false;
+    }
+
+    private static bool CtrlHeldNow() => IsModifierHeld(IsCtrl, VK_CONTROL, VK_LCONTROL, VK_RCONTROL);
+    private static bool AltHeldNow() => IsModifierHeld(IsAlt, VK_MENU, VK_LMENU, VK_RMENU);
+
     private void OnGlobalKeyDown(int vkCode)
     {
         _lastInputTime = DateTime.UtcNow;
@@ -1554,6 +1634,11 @@ public partial class MainWindow : Window
 
         if (IsCtrl(vkCode)) _ctrlDown = true;
         if (IsAlt(vkCode)) _altDown = true;
+
+        // Resynchronisation avec l'état réel du clavier (voir IsModifierHeld) : le suivi
+        // incrémental sert de chemin rapide, GetAsyncKeyState fait foi.
+        if (_ctrlDown && !CtrlHeldNow()) _ctrlDown = false;
+        if (_altDown && !AltHeldNow()) _altDown = false;
 
         // Toutes les touches finales ci-dessous sont reconfigurables individuellement (onglet
         // Général, réglages avancés du panneau de contrôle) — seule la touche finale change, le
@@ -1640,6 +1725,12 @@ public partial class MainWindow : Window
         // avancer/rater silencieusement le combo en cours (voir AppState.CaptureSuspended).
         if (AppState.CaptureSuspended) return;
 
+        // Une fenêtre est en train d'écouter une touche pour l'assigner (onglet Touches,
+        // raccourcis globaux, éditeur de combo) : cet appui sert à CHOISIR une touche, il ne doit
+        // pas en plus être joué comme un coup — il cassait sinon la tentative en cours et
+        // enregistrait une fausse statistique de précision en arrière-plan (audit 2026-08-07 §F7).
+        if (AppState.BindingCaptureActive) return;
+
         // Ignore l'auto-répétition OS : un seul événement d'historique par appui,
         // pas une rafale tant que la touche reste enfoncée.
         KeyBind? bind = null;
@@ -1671,7 +1762,11 @@ public partial class MainWindow : Window
         }
 
         _lastFedActionNames = _pendingBinds.Select(b => b.Action).ToList();
-        _comboRunner?.Feed(new List<KeyBind>(_pendingBinds), DateTime.UtcNow);
+        // `bind` est la touche NOUVELLEMENT pressée (l'auto-répétition OS est déjà filtrée par
+        // _pressedVks.Add côté OnGlobalKeyDown) : c'est ce qui permet à ComboRunner de savoir si
+        // un nouveau coup vient réellement de sortir en jeu, ou si l'ensemble tenu a juste changé
+        // (direction ajoutée sans relâcher l'attaque). Voir ComboRunner.Feed(triggeredBy).
+        _comboRunner?.Feed(new List<KeyBind>(_pendingBinds), DateTime.UtcNow, bind);
 
         _comboTimer?.Stop();
         _comboTimer?.Start();
@@ -1721,7 +1816,8 @@ public partial class MainWindow : Window
     private void OnCaptureSuspendedChanged(bool suspended) => Dispatcher.Invoke(() =>
     {
         _suspendedBadge.Opacity = suspended ? 1.0 : 0.0;
-        Canvas.SetLeft(_suspendedBadge, (_canvasWidth - _suspendedBadge.ActualWidth) / 2);
+        _suspendedBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Canvas.SetLeft(_suspendedBadge, (_canvasWidth - _suspendedBadge.DesiredSize.Width) / 2);
     });
 
     /// <summary>Masquage complet (distinct du verrouillage, qui laisse l'overlay affiché mais
@@ -1737,7 +1833,13 @@ public partial class MainWindow : Window
     private void ShowToast(string text)
     {
         _toastBadge.Text = text;
-        Canvas.SetLeft(_toastBadge, (_canvasWidth - _toastBadge.ActualWidth) / 2);
+        // Mesure forcée avant de centrer : ActualWidth lu juste après avoir changé le texte
+        // renvoie encore la largeur du texte PRÉCÉDENT (0 au premier affichage), WPF n'ayant pas
+        // encore fait sa passe de layout. Les badges apparaissaient donc visiblement décalés,
+        // d'autant que les textes vont de « Combo révélée (3s) » à une phrase entière (audit
+        // 2026-08-07 §M14).
+        _toastBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Canvas.SetLeft(_toastBadge, (_canvasWidth - _toastBadge.DesiredSize.Width) / 2);
 
         _toastBadgeTimer?.Stop();
         _toastBadge.BeginAnimation(OpacityProperty, null);
@@ -1798,6 +1900,12 @@ public partial class MainWindow : Window
         {
             Name = $"Combo {AppState.Combos.Count + 1}",
             Steps = steps,
+            // Prérempli avec l'arme sur laquelle on s'entraîne quand elle est sans ambiguïté :
+            // un combo enregistré pendant qu'on drille une arme précise lui appartient
+            // naturellement. Complément UX au correctif §C3 (qui garantit déjà qu'un combo sans
+            // arme reste visible) — l'utilisateur peut évidemment changer ce choix dans l'écran
+            // de relecture qui suit.
+            Weapon = AppState.Settings.TrainingWeaponFilter,
         };
 
         // Écran de relecture/édition avant sauvegarde (docs/plan.md §1.3.A, jamais fait
@@ -1821,13 +1929,19 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Ne reconstruit QUE la table de correspondance touche→action.
+    ///
+    /// Audit 2026-08-07 §E6 : cette méthode appelait BuildLayout(), ce qui (1) réabonnait les
+    /// sources partagées sans jamais se désabonner — voir le constructeur — et (2) passait par
+    /// SetActiveComboRunner(), donc reconstruisait le ComboRunner : enregistrer une touche
+    /// remettait la série de réussites à zéro et interrompait la tentative en cours. C'est
+    /// exactement ce que SaveCombosQuiet() prend soin d'éviter ailleurs. Depuis le retrait des
+    /// modes Historique/Grand affichage (Version 22), plus rien dans le panneau du mode Tutoriel
+    /// n'affiche de nom de touche : les pastilles sont construites à partir des noms d'ACTION,
+    /// pas des binds. Il n'y a donc plus aucune raison de reconstruire quoi que ce soit ici.</summary>
     private void OnBindsChanged()
     {
-        Dispatcher.Invoke(() =>
-        {
-            RebuildBindMaps();
-            BuildLayout();
-        });
+        Dispatcher.Invoke(RebuildBindMaps);
     }
 
     private int _lastAppliedMonitorIndex = -2; // -2 = jamais appliqué, distinct de -1 (écran principal)
@@ -1866,10 +1980,10 @@ public partial class MainWindow : Window
     /// plutôt que de redémarrer le timer à chaque frappe de curseur dans un champ sans rapport.</summary>
     private void ApplyHudDetectionSettings()
     {
-        var shouldRun = ShouldRequireHitConfirmation();
+        var shouldRun = HudDetectionConfigured();
         var s = AppState.Settings;
         var desired = (shouldRun, s.HudRoiX, s.HudRoiY, s.HudRoiWidth, s.HudRoiHeight);
-        if (_comboRunner is not null) _comboRunner.RequireHitConfirmation = shouldRun;
+        ApplyHitConfirmationGate();
         if (desired == _lastAppliedHudSettings) return;
         _lastAppliedHudSettings = desired;
 
@@ -1885,15 +1999,42 @@ public partial class MainWindow : Window
         _hudHitIndicatorText.Visibility = shouldRun ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>Réutilise directement le réglage existant "Détection de hit" (activé +
-    /// zone calibrée) comme interrupteur pour ComboRunner.RequireHitConfirmation — décision
-    /// explicite de l'utilisateur plutôt qu'un nouveau réglage dédié : dès que ce réglage est
-    /// actif, un combo entièrement joué n'est compté comme réussi que si le HUD confirme
-    /// autant de hits que d'étapes d'attaque (voir Core/ComboRunner.cs).</summary>
-    private static bool ShouldRequireHitConfirmation()
+    /// <summary>La détection de hit est configurée (activée + zone non vide) : suffisant pour
+    /// LANCER la capture, pas pour conditionner la validation d'un combo — voir
+    /// ShouldRequireHitConfirmation.</summary>
+    private static bool HudDetectionConfigured()
     {
         var s = AppState.Settings;
         return s.HudDetectionEnabled && s.HudRoiCalibrated && s.HudRoiWidth > 0 && s.HudRoiHeight > 0;
+    }
+
+    /// <summary>Faut-il exiger un hit HUD confirmé pour valider un combo ? Deux conditions, pas
+    /// une seule : le réglage doit être configuré ET la zone surveillée doit avoir montré un vrai
+    /// changement récemment (HudDamageSource.HasLiveSignal).
+    ///
+    /// Correctif central de l'audit 2026-08-07 §C1. La zone par défaut est codée en dur
+    /// (1318,12,42×39 — celle d'un seul setup) et la détection est activée par défaut : dès que
+    /// cette zone ne correspond à rien de vivant (autre résolution/mise à l'échelle, jeu pas au
+    /// premier plan, jeu pas lancé, entraînement au clavier sur le bureau), aucun hit n'arrivait
+    /// jamais et CHAQUE étape d'attaque cassait la tentative au bout de la fenêtre de
+    /// confirmation. L'app devenait inutilisable sans le moindre message d'explication.
+    ///
+    /// Le repli est volontairement permissif : tant que la zone n'a rien montré, on ne gate pas
+    /// et l'app se comporte exactement comme avant la Version 24. Un gate levé à tort ne fait que
+    /// valider un combo qu'on aurait peut-être dû refuser ; un gate actif à tort rend
+    /// l'entraînement impossible.</summary>
+    private static bool ShouldRequireHitConfirmation() =>
+        HudDetectionConfigured() && AppState.HudDamageSource.HasLiveSignal;
+
+    /// <summary>Réévalue le gate (et la fenêtre de confirmation réglable) sur le ComboRunner
+    /// actif. Appelée à chaque poll de confirmation, pas seulement au changement de réglages :
+    /// HasLiveSignal évolue tout seul au fil du jeu.</summary>
+    private void ApplyHitConfirmationGate()
+    {
+        if (_comboRunner is null) return;
+        _comboRunner.RequireHitConfirmation = ShouldRequireHitConfirmation();
+        _comboRunner.HitConfirmationWindow = TimeSpan.FromMilliseconds(
+            Math.Max(100, AppState.Settings.HitConfirmationWindowMs));
     }
 
     /// <summary>Retour permanent en direct (voir champs _hudTierIndicatorPanel/_hudHitIndicatorText) :
@@ -1902,7 +2043,18 @@ public partial class MainWindow : Window
     /// qu'il joue plutôt que d'attendre un déclenchement ponctuel.</summary>
     private void OnHudRatioSampled(double ratio)
     {
-        Dispatcher.Invoke(() => _hudHitIndicatorText.Text = $"Détection de hit : {ratio * 100:0.0} % changé");
+        Dispatcher.Invoke(() =>
+        {
+            // Dit explicitement quand la zone surveillée n'a encore rien montré : dans cet état,
+            // la validation des combos n'est PAS conditionnée par le HUD (voir
+            // ShouldRequireHitConfirmation/§C1). Sans ce texte, rien à l'écran ne distinguait
+            // « la détection marche » de « la zone ne regarde rien de vivant », alors que les
+            // deux cas ont des conséquences opposées sur la validation.
+            var gate = AppState.HudDamageSource.HasLiveSignal
+                ? "combo validé seulement si ça touche"
+                : "zone inerte → validation non conditionnée";
+            _hudHitIndicatorText.Text = $"Détection de hit : {ratio * 100:0.0} % changé · {gate}";
+        });
     }
 
     private void OnHudTierSampled((int R, int G, int B, DamageTier? HueHint) sample)
@@ -1926,11 +2078,12 @@ public partial class MainWindow : Window
     /// effet si RequireHitConfirmation est faux ou si rien n'est en cours/en attente).</summary>
     private void OnHudHitDetected()
     {
-        Dispatcher.Invoke(() =>
-        {
-            _comboRunner?.ConfirmHit(DateTime.UtcNow);
-            ShowToast("✔ changement détecté (zone HUD)");
-        });
+        // Plus de toast ici (audit 2026-08-07 §M1) : ce feedback de diagnostic était resté câblé
+        // dans le chemin de jeu normal. Avec la détection active par défaut et un debounce de
+        // 60 ms, il pouvait clignoter plusieurs fois par seconde en plein match. L'indicateur
+        // permanent _hudHitIndicatorText (alimenté par Sampled, en haut à gauche) montre déjà la
+        // lecture en direct, en continu et sans masquer l'écran.
+        Dispatcher.Invoke(() => _comboRunner?.ConfirmHit(DateTime.UtcNow));
     }
 
     /// <summary>Les bonnes touches ont toutes été jouées mais le HUD n'a pas encore confirmé
@@ -1944,7 +2097,7 @@ public partial class MainWindow : Window
 
     /// <summary>La fenêtre d'attente a expiré sans assez de hits confirmés (voir
     /// ComboRunner.HitNotConfirmed) : les bonnes touches ont été jouées mais rien ne prouve
-    /// qu'elles aient touché l'adversaire — même bookkeeping que OnComboReset/OnComboAbandoned
+    /// qu'elles aient touché l'adversaire — même bookkeeping que OnComboReset
     /// (TotalAttempts, pas TotalCompletions), flash orange pour distinguer d'une mauvaise touche.</summary>
     private void OnComboHitNotConfirmed()
     {

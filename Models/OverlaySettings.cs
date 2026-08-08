@@ -123,6 +123,15 @@ public sealed class OverlaySettings
     /// Bien plus simple qu'un OCR de chiffres : une couleur moyenne + une classification par
     /// teinte, pas de gabarit à fabriquer. Activée par défaut depuis la Version 24, même
     /// raisonnement que HudDetectionEnabled ci-dessus.</summary>
+    /// <summary>Fenêtre (ms) pendant laquelle un hit HUD est attendu après une étape d'attaque
+    /// réussie, avant d'invalider la tentative (voir ComboRunner.HitConfirmationWindow). Sorti
+    /// en réglage lors de l'audit 2026-08-07 (§F9) : c'est le paramètre du chemin critique qui a
+    /// demandé le plus de réajustements en test réel (900 → 400 → 250 → 600), et il dépend du
+    /// setup (latence d'affichage, vitesse du coup) — le figer en constante obligeait à
+    /// recompiler. Trop bas = de vrais coups qui touchent sont invalidés ; trop haut = un coup
+    /// dans le vide met plus longtemps à être détecté.</summary>
+    public int HitConfirmationWindowMs { get; set; } = 600;
+
     public bool HudTierDetectionEnabled { get; set; } = true;
     public bool HudTierRoiCalibrated { get; set; } = true;
     public int HudTierRoiX { get; set; } = 1310;

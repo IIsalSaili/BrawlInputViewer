@@ -478,6 +478,10 @@ public partial class ParcoursWindow : Window
         // machine pendant le test).
         if (AppState.CaptureSuspended) return;
 
+        // Même garde que MainWindow (audit 2026-08-07 §F7) : un appui servant à assigner une
+        // touche dans une autre fenêtre ne doit pas valider une leçon au passage.
+        if (AppState.BindingCaptureActive) return;
+
         var isNewPress = _pressedVks.Add(vkCode);
         if (!_bindsByVk.TryGetValue(vkCode, out var bind)) return;
 
@@ -502,7 +506,7 @@ public partial class ParcoursWindow : Window
                         {
                             if (_bindsByVk.TryGetValue(vk, out var heldBind) && !held.Contains(heldBind)) held.Add(heldBind);
                         }
-                        _sequenceRunner?.Feed(held, DateTime.UtcNow);
+                        _sequenceRunner?.Feed(held, DateTime.UtcNow, bind);
                     }
                     break;
 

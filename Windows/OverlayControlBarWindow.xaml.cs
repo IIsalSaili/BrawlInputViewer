@@ -42,6 +42,10 @@ public partial class OverlayControlBarWindow : Window
         InitializeComponent();
         _openPanel = openPanel;
 
+        // SizeToContent="WidthAndHeight" a été retiré du XAML (audit 2026-08-07 §M7) : il
+        // ÉCRASAIT ces deux affectations, donc la fenêtre prenait la taille réelle de son
+        // contenu pendant que Reposition la plaçait avec les constantes 220×40 — le placement
+        // "bas-droite moins 16px" était systématiquement décalé de la différence.
         Width = WindowWidth;
         Height = WindowHeight;
 

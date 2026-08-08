@@ -51,6 +51,7 @@ public partial class DashboardWindow : Window
     private readonly Dictionary<string, BitmapImage> _portraitCache = new();
 
     private ControlPanelWindow? _controlPanel;
+    private ParcoursWindow? _parcours;
 
     public DashboardWindow(bool inGameMode = false)
     {
@@ -575,7 +576,23 @@ public partial class DashboardWindow : Window
             BorderThickness = new Thickness(0),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        tutorialBtn.Click += (_, _) => new ParcoursWindow().Show();
+        // Réutilise la fenêtre déjà ouverte au lieu d'en empiler une nouvelle à chaque clic
+        // (audit 2026-08-07 §F2) — même patron que OpenAdvancedSettings ci-dessous et que
+        // MainWindow.OpenDashboard, qui géraient déjà ce cas correctement.
+        tutorialBtn.Click += (_, _) =>
+        {
+            if (_parcours is null || !_parcours.IsLoaded)
+            {
+                _parcours = new ParcoursWindow();
+                _parcours.Closed += (_, _) => _parcours = null;
+                _parcours.Show();
+            }
+            else
+            {
+                if (_parcours.WindowState == WindowState.Minimized) _parcours.WindowState = WindowState.Normal;
+                _parcours.Activate();
+            }
+        };
 
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -714,6 +731,14 @@ public partial class DashboardWindow : Window
 
     private void RefreshCombosList()
     {
+        // `hadSelection` distingue "rien n'a encore été sélectionné" (premier remplissage) de
+        // "l'utilisateur a choisi la ligne — Aucun combo —". Sans cette distinction,
+        // SelectedComboIndex() renvoyait -1 dans les DEUX cas, et comme -1 est une valeur
+        // légitime de _visibleIndices (la première ligne), la restauration ci-dessous retombait
+        // systématiquement sur "Aucun combo" au lieu du combo actif. Invisible tant que
+        // LaunchOverlay ignorait -1 ; devenu visible en corrigeant §F1, qui rend ce choix
+        // effectif.
+        var hadSelection = _combosList.SelectedIndex >= 0;
         var previouslySelected = SelectedComboIndex();
 
         _combosList.Items.Clear();
@@ -736,9 +761,9 @@ public partial class DashboardWindow : Window
             _combosList.Items.Add($"{indent}{weaponTag}{combo.Name}{masteredMark}{levelTag}  ({combo.Steps.Count} étapes){followUpHint}");
         }
 
-        var restored = _visibleIndices.IndexOf(previouslySelected);
-        _combosList.SelectedIndex = restored >= 0 ? restored : (AppState.ActiveComboIndex >= 0 ? _visibleIndices.IndexOf(AppState.ActiveComboIndex) : 0);
-        if (_combosList.SelectedIndex < 0) _combosList.SelectedIndex = 0;
+        var restored = hadSelection ? _visibleIndices.IndexOf(previouslySelected) : -1;
+        if (restored < 0 && AppState.ActiveComboIndex >= 0) restored = _visibleIndices.IndexOf(AppState.ActiveComboIndex);
+        _combosList.SelectedIndex = restored >= 0 ? restored : 0;
     }
 
     private UIElement BuildFooter()
@@ -805,8 +830,10 @@ public partial class DashboardWindow : Window
 
     private void LaunchOverlay()
     {
-        var chosen = SelectedComboIndex();
-        if (chosen >= 0) AppState.SetActiveCombo(chosen);
+        // -1 = la ligne « — Aucun combo sélectionné — » : c'est un choix explicite de l'utilisateur,
+        // pas une absence de sélection. L'ancienne condition (`if (chosen >= 0)`) l'ignorait
+        // simplement, donc l'option existait mais n'avait aucun effet (audit 2026-08-07 §F1).
+        AppState.SetActiveCombo(SelectedComboIndex());
 
         // En mode in-game, un MainWindow tourne déjà : SetActiveCombo ci-dessus lui est
         // propagé en direct (ActiveComboChanged, le même event qu'utilise Ctrl+Alt+K) —

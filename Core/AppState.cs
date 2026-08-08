@@ -47,7 +47,46 @@ public static class AppState
     // de l'utilisateur, et sans risque de dupliquer à chaque lancement.
     static AppState()
     {
+        DeduplicateComboIds();
         foreach (var weapon in WeaponComboPresets.Weapons) ImportWeaponPresets(weapon);
+
+        // Le combo actif de départ doit appartenir au personnage sur lequel on s'entraîne.
+        //
+        // L'initialiseur de ActiveComboIndex vaut `_combos.Count > 0 ? 0 : -1` : il prend le
+        // PREMIER combo du fichier sans jamais regarder TrainingLegendFilter/TrainingWeaponFilter,
+        // pourtant restaurés depuis settings.json juste avant. Comme combos[0] est un combo Hache,
+        // relancer l'app avec un personnage qui ne joue pas la Hache (ex. Nix — Faux/Blasters)
+        // affichait un combo Hache pour ce personnage, et rien ne corrigeait : seul un
+        // Ctrl+Alt+K le remettait dans la liste filtrée (CycleCombo fait IndexOf → -1 → repart à
+        // filtered[0]). Signalé par l'utilisateur le 2026-08-08 ; c'était bien un bug de
+        // démarrage, pas un bug de filtre.
+        if (!FilteredComboIndices().Contains(ActiveComboIndex)) ActiveComboIndex = FirstFilteredIndex();
+
+        _activeComboId = ActiveComboIndex >= 0 && ActiveComboIndex < _combos.Count ? _combos[ActiveComboIndex].Id : "";
+    }
+
+    /// <summary>Garantit l'unicité des Id au chargement (audit 2026-08-07 §M6) : rien ne
+    /// l'imposait jusqu'ici — un combos.json édité à la main, ou un import de profil complet
+    /// (ControlPanelWindow.ImportProfileBundle, qui réinjecte une liste entière sans
+    /// dédoublonner), pouvait contenir deux fois le même Id. ComboFamilies.Group fait alors un
+    /// ToDictionary sur l'Id, qui lève ArgumentException sur une clé en double : ce n'était pas
+    /// un affichage dégradé mais une exception non gérée qui cassait tout l'affichage des
+    /// listes de combos (panneau de contrôle ET Dashboard). Le suivi du combo actif par Id
+    /// (voir _activeComboId) en dépend aussi.</summary>
+    private static void DeduplicateComboIds()
+    {
+        var seen = new HashSet<string>();
+        var changed = false;
+        foreach (var combo in _combos)
+        {
+            if (string.IsNullOrEmpty(combo.Id) || !seen.Add(combo.Id))
+            {
+                combo.Id = Guid.NewGuid().ToString("N");
+                seen.Add(combo.Id);
+                changed = true;
+            }
+        }
+        if (changed) ComboConfig.Save(_combos);
     }
 
     public static bool Locked { get; private set; } = true;
@@ -106,6 +145,14 @@ public static class AppState
 
     public static void ToggleCaptureSuspended() => SetCaptureSuspended(!CaptureSuspended);
 
+    /// <summary>Vrai pendant qu'une fenêtre écoute une touche pour l'assigner (onglet Touches,
+    /// raccourcis globaux, éditeur de combo). Le hook est global et partagé, donc sans ce
+    /// drapeau l'appui servant à choisir une touche était AUSSI transmis au ComboRunner actif —
+    /// il pouvait casser une tentative en cours ou enregistrer une fausse statistique de
+    /// précision en arrière-plan (audit 2026-08-07 §F7). Les fenêtres d'écoute le posent le
+    /// temps de leur capture ; MainWindow/ParcoursWindow l'honorent comme CaptureSuspended.</summary>
+    public static bool BindingCaptureActive { get; set; }
+
     /// <summary>Demande à l'overlay de révéler temporairement le combo en mode révision
     /// (déclenché depuis le panneau de contrôle, en plus du raccourci Ctrl+Alt+I).</summary>
     public static event Action? QuizRevealRequested;
@@ -113,8 +160,34 @@ public static class AppState
 
     /// <summary>Persiste combos.json sans lever CombosChanged : utilisé pour les compteurs de
     /// performance (BestStreak/TotalAttempts...) mutés en place à chaque tentative, pour ne
-    /// pas reconstruire le ComboRunner actif (et perdre sa série en cours) à chaque coup joué.</summary>
-    public static void SaveCombosQuiet() => ComboConfig.Save(_combos);
+    /// pas reconstruire le ComboRunner actif (et perdre sa série en cours) à chaque coup joué.
+    ///
+    /// Différé (audit 2026-08-07 §M3) : chaque tentative de combo réécrivait intégralement les
+    /// ~100 combos, de façon synchrone sur le thread UI — le même thread qui sert le hook
+    /// clavier bas niveau (voir §M2). En session d'entraînement ça faisait des centaines
+    /// d'écritures complètes par minute. On marque désormais "sale" et un flush périodique
+    /// (FlushPendingSaves, appelé par un timer de MainWindow et à la fermeture de l'app) écrit
+    /// une seule fois. Aucune perte au pire : la dernière poignée de secondes de compteurs.</summary>
+    public static void SaveCombosQuiet() => _combosDirty = true;
+
+    private static bool _combosDirty;
+    private static bool _statsDirty;
+
+    /// <summary>Écrit sur disque ce qui a changé depuis le dernier appel. Idempotent et sans
+    /// effet si rien n'est en attente — appelé périodiquement et à la fermeture de l'app.</summary>
+    public static void FlushPendingSaves()
+    {
+        if (_combosDirty)
+        {
+            _combosDirty = false;
+            ComboConfig.Save(_combos);
+        }
+        if (_statsDirty)
+        {
+            _statsDirty = false;
+            StatsConfig.Save(new List<ActionStat>(_stats.Values));
+        }
+    }
 
     private static Dictionary<string, ActionStat> BuildStatsIndex(List<ActionStat> stats)
     {
@@ -135,7 +208,10 @@ public static class AppState
             }
             if (success) stat.Successes++; else stat.Failures++;
         }
-        StatsConfig.Save(new List<ActionStat>(_stats.Values));
+        // Différé comme SaveCombosQuiet (§M3) : cette méthode est appelée à CHAQUE étape de
+        // combo, réussie ou ratée — réécrire stats.json en entier à chaque frappe était la
+        // deuxième source d'écritures synchrones sur le thread UI.
+        _statsDirty = true;
     }
 
     public static void LogSessionMove(string actionsText) => SessionLog.Add((DateTime.UtcNow, actionsText));
@@ -188,12 +264,43 @@ public static class AppState
         NotifyCombosMutated();
     }
 
-    /// <summary>Call after mutating Combos/Combo items in place (add/edit/delete/reorder).</summary>
+    /// <summary>Call after mutating Combos/Combo items in place (add/edit/delete/reorder).
+    ///
+    /// Re-résout le combo actif par son Id avant de notifier (audit 2026-08-07 §E5) :
+    /// ActiveComboIndex est un simple index, donc supprimer ou réordonner un combo situé AVANT
+    /// lui décalait toute la liste sans que l'index sorte des bornes — aucune correction n'était
+    /// déclenchée et l'overlay se mettait silencieusement à entraîner un autre combo que celui
+    /// affiché juste avant.</summary>
     public static void NotifyCombosMutated()
     {
+        _combosDirty = false; // cette sauvegarde couvre aussi les compteurs différés en attente
         ComboConfig.Save(_combos);
+        ResolveActiveComboAfterMutation();
         CombosChanged?.Invoke();
-        if (ActiveComboIndex < 0 || ActiveComboIndex >= _combos.Count) SetActiveCombo(FirstFilteredIndex());
+    }
+
+    /// <summary>Id du combo actif, mémorisé à chaque SetActiveCombo pour pouvoir retrouver le
+    /// même combo après une mutation de la liste (voir NotifyCombosMutated).</summary>
+    private static string _activeComboId = "";
+
+    private static void ResolveActiveComboAfterMutation()
+    {
+        if (!string.IsNullOrEmpty(_activeComboId))
+        {
+            var byId = _combos.FindIndex(c => c.Id == _activeComboId);
+            if (byId >= 0)
+            {
+                if (byId != ActiveComboIndex)
+                {
+                    ActiveComboIndex = byId;
+                    ActiveComboChanged?.Invoke(byId);
+                }
+                return;
+            }
+        }
+
+        // Le combo actif n'existe plus (supprimé) : repli sur le premier combo visible.
+        SetActiveCombo(FirstFilteredIndex());
     }
 
     /// <summary>Importe les 5 combos préréglés de l'arme donnée (voir WeaponComboPresets) dans
@@ -209,11 +316,65 @@ public static class AppState
         var changed = false;
         foreach (var preset in WeaponComboPresets.BuildPresetCombos().Where(c => c.Weapon == weapon))
         {
-            if (indexById.TryGetValue(preset.Id, out var idx)) _combos[idx] = preset;
-            else _combos.Add(preset);
-            changed = true;
+            if (indexById.TryGetValue(preset.Id, out var idx)) changed |= UpsertPreset(idx, preset);
+            else { _combos.Add(preset); changed = true; }
         }
         if (changed) NotifyCombosMutated();
+    }
+
+    /// <summary>Applique le contenu d'un combo préréglé sur l'entrée existante de même Id, en
+    /// PRÉSERVANT tout ce qui appartient à l'utilisateur. Retourne vrai si quelque chose a
+    /// réellement changé (donc si une sauvegarde est nécessaire).
+    ///
+    /// Audit 2026-08-07 §C2/§M5 : l'ancienne version faisait <c>_combos[idx] = preset</c>, un
+    /// remplacement d'objet entier. Comme le constructeur statique réimporte les 15 armes à
+    /// CHAQUE démarrage, ça remettait à zéro BestStreak/TotalCompletions/TotalAttempts/Mastered
+    /// de tous les combos préréglés à chaque lancement — vérifié sur le combos.json réel de
+    /// l'utilisateur : 100 presets, 0 statistique, alors que l'app avait bien servi. Toute la
+    /// couche "progression / maîtrisé ✓ / série record / session guidée" ne pouvait donc
+    /// structurellement rien afficher d'autre que zéro.
+    ///
+    /// Un preset modifié à la main dans l'éditeur (Combo.UserModified) n'est plus écrasé du
+    /// tout : son contenu appartient désormais à l'utilisateur, pas au fichier de presets.</summary>
+    private static bool UpsertPreset(int idx, Combo preset)
+    {
+        var existing = _combos[idx];
+        if (existing.UserModified) return false;
+
+        // Rien à réécrire si le contenu est déjà identique : évite une sauvegarde (et un
+        // CombosChanged) inutile à chaque démarrage.
+        if (existing.Name == preset.Name
+            && existing.Description == preset.Description
+            && existing.Weapon == preset.Weapon
+            && existing.Legend == preset.Legend
+            && existing.MinDex == preset.MinDex
+            && existing.DamageNote == preset.DamageNote
+            && existing.DefaultToleranceMs == preset.DefaultToleranceMs
+            && StepsEqual(existing.Steps, preset.Steps))
+        {
+            return false;
+        }
+
+        existing.Name = preset.Name;
+        existing.Description = preset.Description;
+        existing.Weapon = preset.Weapon;
+        existing.Legend = preset.Legend;
+        existing.MinDex = preset.MinDex;
+        existing.DamageNote = preset.DamageNote;
+        existing.DefaultToleranceMs = preset.DefaultToleranceMs;
+        existing.Steps = preset.Steps;
+        // BestStreak / TotalCompletions / TotalAttempts / Mastered : volontairement intacts.
+        return true;
+    }
+
+    private static bool StepsEqual(List<ComboStep> a, List<ComboStep> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!a[i].RequiredActions.SequenceEqual(b[i].RequiredActions)) return false;
+        }
+        return true;
     }
 
     /// <summary>Importe les combos préréglées d'un légend (voir LegendComboPresets), même logique
@@ -226,9 +387,8 @@ public static class AppState
         var changed = false;
         foreach (var preset in LegendComboPresets.BuildPresetCombos().Where(c => c.Legend == legend))
         {
-            if (indexById.TryGetValue(preset.Id, out var idx)) _combos[idx] = preset;
-            else _combos.Add(preset);
-            changed = true;
+            if (indexById.TryGetValue(preset.Id, out var idx)) changed |= UpsertPreset(idx, preset);
+            else { _combos.Add(preset); changed = true; }
         }
         if (changed) NotifyCombosMutated();
     }
@@ -263,13 +423,24 @@ public static class AppState
         for (var i = 0; i < _combos.Count; i++)
         {
             var combo = _combos[i];
-            if (legendWeapons is not null)
+
+            // Un combo perso (ni arme ni légend renseignés : enregistré via Ctrl+Alt+R, créé à
+            // la main, ou importé depuis un fichier) n'appartient à aucun personnage — il doit
+            // rester visible quel que soit le filtre, pas disparaître parce qu'on s'entraîne sur
+            // quelqu'un. Audit 2026-08-07 §C3 : sans cette exception, comme le flux Dashboard
+            // sélectionne toujours un personnage, tout combo enregistré devenait invisible
+            // immédiatement après sa création (et devenait quand même "actif", d'où un
+            // affichage "0/N" et une perte définitive au premier Ctrl+Alt+K) — la fonction
+            // d'enregistrement donnait l'impression de ne rien faire.
+            var isPersonal = string.IsNullOrEmpty(combo.Weapon) && string.IsNullOrEmpty(combo.Legend);
+
+            if (legendWeapons is not null && !isPersonal)
             {
                 var matchesLegend = combo.Legend == legendFilter;
                 var matchesCharacterWeapon = string.IsNullOrEmpty(combo.Legend) && legendWeapons.Contains(combo.Weapon);
                 if (!matchesLegend && !matchesCharacterWeapon) continue;
             }
-            if (!string.IsNullOrEmpty(weaponFilter) && combo.Weapon != weaponFilter) continue;
+            if (!string.IsNullOrEmpty(weaponFilter) && !isPersonal && combo.Weapon != weaponFilter) continue;
 
             // Un combo qui demande plus de Dex que ce que le personnage choisi peut atteindre même
             // avec une stance (base + 1, voir LegendStats) est physiquement injouable sur lui — ne
@@ -340,6 +511,7 @@ public static class AppState
     {
         if (ActiveComboIndex == index) return;
         ActiveComboIndex = index;
+        _activeComboId = index >= 0 && index < _combos.Count ? _combos[index].Id : "";
         ActiveComboChanged?.Invoke(index);
     }
 

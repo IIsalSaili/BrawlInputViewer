@@ -38,4 +38,30 @@ public partial class App : Application
         MainWindow = entry;
         entry.Show();
     }
+
+    /// <summary>Libère les ressources partagées (hooks clavier/manette, sources de vision) et
+    /// vide les sauvegardes en attente.
+    ///
+    /// Audit 2026-08-07 §M16 : c'était MainWindow.Closed qui appelait Dispose sur
+    /// AppState.Hook/Gamepad, alors que ce sont des singletons partagés — une ParcoursWindow
+    /// encore ouverte après la fermeture de l'overlay cessait silencieusement de recevoir des
+    /// touches. La propriété du cycle de vie appartient à l'application, pas à une fenêtre parmi
+    /// d'autres. §M3 : le flush final garantit qu'aucun compteur différé n'est perdu.</summary>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try
+        {
+            AppState.FlushPendingSaves();
+            AppState.Hook.Dispose();
+            AppState.Gamepad.Dispose();
+            AppState.HudDamageSource.Dispose();
+            AppState.HudTierSource.Dispose();
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.LogException("OnExit", ex);
+        }
+
+        base.OnExit(e);
+    }
 }
