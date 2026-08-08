@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -21,13 +22,7 @@ namespace BrawlhallaOverlay;
 /// </summary>
 public partial class ParcoursWindow : Window
 {
-    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x27, 0x35));
-    private static readonly Brush TextColor = Brushes.White;
-    private static readonly Brush SubtleText = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA));
-    private static readonly Brush AccentGold = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A));
-    private static readonly Brush GreenBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xCC, 0x71));
-    private static readonly Brush OrangeBrush = new SolidColorBrush(Color.FromRgb(0xE6, 0x7E, 0x22));
-    private static readonly Brush PanelBg = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22));
+    // Palette centralisée dans Core/Theme.cs
 
     private readonly List<Lesson> _lessons = ParcoursCurriculum.BuildLessons();
     private int _currentIndex;
@@ -35,6 +30,30 @@ public partial class ParcoursWindow : Window
 
     private readonly Dictionary<int, KeyBind> _bindsByVk = new();
     private readonly HashSet<int> _pressedVks = new();
+
+    // --- Raccourcis Ctrl+Alt+* (verrouiller/suspendre), dupliqués depuis MainWindow.
+    // OnGlobalKeyDown — jusqu'ici seuls les boutons d'en-tête (🔒/⏸) fonctionnaient quand cette
+    // fenêtre est ouverte SEULE (sans MainWindow/l'overlay à côté, qui est la seule autre fenêtre
+    // à intercepter ces touches) : les leçons 0.2/0.3 enseignent explicitement Ctrl+Alt+O/H comme
+    // méthode, elle doit donc marcher ici aussi, pas seulement via le bouton. Même petit bug
+    // évité que le §M18/régression Ctrl+Alt (CLAUDE.md, Version 26) : ne jamais resynchroniser le
+    // modificateur que CET appui vient de presser lui-même contre GetAsyncKeyState.
+    private const int VK_CONTROL = 0x11;
+    private const int VK_LCONTROL = 0xA2;
+    private const int VK_RCONTROL = 0xA3;
+    private const int VK_MENU = 0x12;
+    private const int VK_LMENU = 0xA4;
+    private const int VK_RMENU = 0xA5;
+    private bool _ctrlDown;
+    private bool _altDown;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    private static bool IsCtrl(int vkCode) => vkCode is VK_CONTROL or VK_LCONTROL or VK_RCONTROL;
+    private static bool IsAlt(int vkCode) => vkCode is VK_MENU or VK_LMENU or VK_RMENU;
+    private static bool CtrlHeldNow() => (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 || (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0 || (GetAsyncKeyState(VK_RCONTROL) & 0x8000) != 0;
+    private static bool AltHeldNow() => (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 || (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0 || (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
 
     private TextBlock _headerText = null!;
     private TextBlock _objectiveText = null!;
@@ -59,15 +78,29 @@ public partial class ParcoursWindow : Window
     private DispatcherTimer? _absenceTimer;
     private TextBlock? _absenceCountdownText;
     private Action? _unsubscribeToggle;
+    private DispatcherTimer? _autoAdvanceTimer;
+
+    // Bandeau overlay en jeu (demande explicite de l'utilisateur, 2026-08-08) : possédé par
+    // cette fenêtre — créé à l'ouverture, fermé avec elle — pour que jouer une leçon ne demande
+    // plus d'alt-tabber vers cette fenêtre bordée. Voir Windows/ParcoursOverlayWindow.xaml.cs.
+    private readonly ParcoursOverlayWindow _overlay = new();
 
     public ParcoursWindow()
     {
         InitializeComponent();
+
+        // Mutuellement exclusif avec MainWindow (voir AppState.ParcoursRunning) — consulté par
+        // DashboardWindow avant de lancer l'overlay pendant que le Parcours tourne.
+        AppState.ParcoursRunning = true;
+        AppState.CloseParcoursRequested = Close;
+
         RebuildBindMap();
         AppState.BindsChanged += OnBindsChanged;
 
         BuildStaticLayout();
         LoadLesson(FindStartIndex(AppState.ParcoursCurrentLessonId));
+
+        _overlay.Show();
 
         Loaded += (_, _) =>
         {
@@ -85,7 +118,11 @@ public partial class ParcoursWindow : Window
             AppState.Gamepad.ButtonDown -= OnGlobalKeyDown;
             AppState.Gamepad.ButtonUp -= OnGlobalKeyUp;
             AppState.BindsChanged -= OnBindsChanged;
+            _autoAdvanceTimer?.Stop();
             CleanupCurrentLessonState();
+            _overlay.Close();
+            AppState.ParcoursRunning = false;
+            AppState.CloseParcoursRequested = null;
         };
     }
 
@@ -128,7 +165,7 @@ public partial class ParcoursWindow : Window
 
         var header = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0xC4, 0x4A)),
             BorderThickness = new Thickness(0, 0, 0, 2),
             Padding = new Thickness(20, 14, 20, 14),
@@ -136,7 +173,7 @@ public partial class ParcoursWindow : Window
         var headerGrid = new Grid();
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _headerText = new TextBlock { FontSize = 15, FontWeight = FontWeights.Bold, Foreground = AccentGold, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 12, 0) };
+        _headerText = new TextBlock { FontSize = 15, FontFamily = Theme.AccentFontFamily, FontWeight = FontWeights.Bold, Foreground = Theme.AccentGold, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 12, 0) };
         Grid.SetColumn(_headerText, 0);
 
         var headerButtons = new StackPanel { Orientation = Orientation.Horizontal };
@@ -168,9 +205,29 @@ public partial class ParcoursWindow : Window
         Closed += (_, _) => AppState.LockChanged -= onLockChanged;
         headerButtons.Children.Add(lockBtn);
 
-        var listBtn = new Button { Content = "Voir toutes les leçons", Padding = new Thickness(8, 4, 8, 4), Focusable = false };
+        var listBtn = new Button { Content = "Voir toutes les leçons", Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(0, 0, 8, 0), Focusable = false };
         listBtn.Click += (_, _) => OpenLessonList();
         headerButtons.Children.Add(listBtn);
+
+        // Demande explicite de l'utilisateur (2026-08-08) : pouvoir repartir de zéro pour
+        // retester le Parcours en entier. Confirmation obligatoire (même style que la suppression
+        // de profil dans ControlPanelWindow) : action destructive sur la progression, pas de undo.
+        var resetBtn = new Button { Content = "↺ Recommencer le Parcours", Padding = new Thickness(8, 4, 8, 4), Focusable = false };
+        resetBtn.Click += (_, _) =>
+        {
+            var confirm = MessageBox.Show(
+                "Remettre à zéro toute la progression du Parcours ? Toutes les leçons validées repasseront à \"pas encore validé\".",
+                "Recommencer le Parcours",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            AppState.ResetParcoursProgress();
+            _autoAdvanceTimer?.Stop();
+            CleanupCurrentLessonState();
+            LoadLesson(0);
+        };
+        headerButtons.Children.Add(resetBtn);
 
         Grid.SetColumn(headerButtons, 1);
         headerGrid.Children.Add(_headerText);
@@ -181,7 +238,7 @@ public partial class ParcoursWindow : Window
 
         var footer = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0xC4, 0x4A)),
             BorderThickness = new Thickness(0, 2, 0, 0),
             Padding = new Thickness(20, 12, 20, 12),
@@ -200,14 +257,14 @@ public partial class ParcoursWindow : Window
         var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         var body = new StackPanel { Margin = new Thickness(24, 16, 24, 16) };
 
-        _objectiveText = new TextBlock { FontSize = 17, FontWeight = FontWeights.Bold, Foreground = TextColor, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) };
+        _objectiveText = new TextBlock { FontSize = 17, FontWeight = FontWeights.Bold, Foreground = Theme.TextPrimary, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) };
         _explanationText = new TextBlock { FontSize = 13, Foreground = new SolidColorBrush(Color.FromArgb(0xDD, 0xFF, 0xFF, 0xFF)), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) };
         _badgeText = new TextBlock { FontSize = 12, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 16) };
 
         _drillPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
 
-        _verifyText = new TextBlock { FontSize = 12, FontStyle = FontStyles.Italic, Foreground = OrangeBrush, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) };
-        _sourceText = new TextBlock { FontSize = 10, Foreground = SubtleText, TextWrapping = TextWrapping.Wrap };
+        _verifyText = new TextBlock { FontSize = 12, FontStyle = FontStyles.Italic, Foreground = Theme.StateWarning, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) };
+        _sourceText = new TextBlock { FontSize = 10, Foreground = Theme.TextSubtle, TextWrapping = TextWrapping.Wrap };
 
         body.Children.Add(_objectiveText);
         body.Children.Add(_explanationText);
@@ -225,6 +282,7 @@ public partial class ParcoursWindow : Window
     private void GoTo(int index)
     {
         if (index < 0 || index >= _lessons.Count) return;
+        _autoAdvanceTimer?.Stop();
         CleanupCurrentLessonState();
         LoadLesson(index);
     }
@@ -248,6 +306,10 @@ public partial class ParcoursWindow : Window
 
         BuildDrillPanel(lesson);
         UpdateBadge();
+        // _pressedOnce est déjà rempli par BuildPressAllOncePanel ci-dessus (repris depuis
+        // AppState.IsLessonCompleted si la leçon était déjà validée) — le bandeau overlay part
+        // du même état plutôt que de le recalculer indépendamment.
+        _overlay.ShowLesson(lesson, _currentLessonValidated, _pressedOnce);
 
         _prevBtn.IsEnabled = index > 0;
         _nextBtn.IsEnabled = index < _lessons.Count - 1;
@@ -259,17 +321,17 @@ public partial class ParcoursWindow : Window
         if (_currentLessonValidated)
         {
             _badgeText.Text = "✅ Validé";
-            _badgeText.Foreground = GreenBrush;
+            _badgeText.Foreground = Theme.StateSuccess;
         }
         else if (!lesson.FullyValidatedByApp)
         {
             _badgeText.Text = "🟡 Partiellement validé par l'app";
-            _badgeText.Foreground = OrangeBrush;
+            _badgeText.Foreground = Theme.StateWarning;
         }
         else
         {
             _badgeText.Text = "○ Pas encore validé";
-            _badgeText.Foreground = SubtleText;
+            _badgeText.Foreground = Theme.TextSubtle;
         }
     }
 
@@ -279,6 +341,21 @@ public partial class ParcoursWindow : Window
         _currentLessonValidated = true;
         AppState.MarkLessonCompleted(Current.Id);
         UpdateBadge();
+        _overlay.ShowValidatedFlash();
+
+        // Auto-avance vers la leçon suivante une fois validée (demande explicite de
+        // l'utilisateur, "comme un vrai tuto") — délai court pour laisser le temps de voir la
+        // confirmation ("✅ Leçon validée") avant que l'écran ne change. Sans effet sur la
+        // dernière leçon (GoTo ignore un index hors bornes). Un GoTo manuel (Précédent/Suivant/
+        // liste) pendant ce délai l'annule (voir GoTo).
+        _autoAdvanceTimer?.Stop();
+        _autoAdvanceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        _autoAdvanceTimer.Tick += (_, _) =>
+        {
+            _autoAdvanceTimer!.Stop();
+            GoTo(_currentIndex + 1);
+        };
+        _autoAdvanceTimer.Start();
     }
 
     /// <summary>Stoppe tout état vivant (timer, souscription) attaché à la leçon quittée — sinon un
@@ -327,11 +404,11 @@ public partial class ParcoursWindow : Window
             var alreadyDone = _currentLessonValidated;
             var chip = new Border
             {
-                Background = alreadyDone ? GreenBrush : CardBg,
+                Background = alreadyDone ? Theme.StateSuccess : Theme.BgCard,
                 CornerRadius = new CornerRadius(14),
                 Padding = new Thickness(14, 6, 14, 6),
                 Margin = new Thickness(0, 0, 8, 8),
-                Child = new TextBlock { Text = action, Foreground = TextColor },
+                Child = new TextBlock { Text = action, Foreground = Theme.TextPrimary },
             };
             _chipByAction[action] = chip;
             if (alreadyDone) _pressedOnce.Add(action);
@@ -350,23 +427,24 @@ public partial class ParcoursWindow : Window
         _sequenceRunner = new ComboRunner(combo);
         _sequenceRunner.StepSucceeded += idx =>
         {
-            if (idx >= 0 && idx < _stepPills.Count) _stepPills[idx].Background = GreenBrush;
+            if (idx >= 0 && idx < _stepPills.Count) _stepPills[idx].Background = Theme.StateSuccess;
+            _overlay.MarkSequenceStepDone(idx);
         };
         _sequenceRunner.ComboCompleted += MarkValidated;
-        _sequenceRunner.StepFailed += (_, _) => ResetStepPills();
-        _sequenceRunner.ComboReset += ResetStepPills;
+        _sequenceRunner.StepFailed += (_, _) => { ResetStepPills(); _overlay.ResetSequenceSteps(); };
+        _sequenceRunner.ComboReset += () => { ResetStepPills(); _overlay.ResetSequenceSteps(); };
 
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         for (var i = 0; i < lesson.Sequence.Count; i++)
         {
-            if (i > 0) row.Children.Add(new TextBlock { Text = "→", Foreground = SubtleText, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) });
+            if (i > 0) row.Children.Add(new TextBlock { Text = "→", Foreground = Theme.TextSubtle, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) });
             var label = string.Join(" + ", lesson.Sequence[i].RequiredActions);
             var pill = new Border
             {
-                Background = CardBg,
+                Background = Theme.BgCard,
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(10, 8, 10, 8),
-                Child = new TextBlock { Text = label, Foreground = TextColor, TextAlignment = TextAlignment.Center },
+                Child = new TextBlock { Text = label, Foreground = Theme.TextPrimary, TextAlignment = TextAlignment.Center },
             };
             _stepPills.Add(pill);
             row.Children.Add(pill);
@@ -376,13 +454,13 @@ public partial class ParcoursWindow : Window
 
     private void ResetStepPills()
     {
-        foreach (var pill in _stepPills) pill.Background = CardBg;
+        foreach (var pill in _stepPills) pill.Background = Theme.BgCard;
     }
 
     private void BuildAbsenceTimerPanel(Lesson lesson)
     {
         _absenceResetTime = DateTime.UtcNow;
-        _absenceCountdownText = new TextBlock { FontSize = 14, Foreground = TextColor };
+        _absenceCountdownText = new TextBlock { FontSize = 14, Foreground = Theme.TextPrimary };
         _drillPanel.Children.Add(_absenceCountdownText);
 
         _absenceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -393,11 +471,13 @@ public partial class ParcoursWindow : Window
             {
                 _absenceTimer!.Stop();
                 _absenceCountdownText.Text = "✅ Tenu sans esquiver — bien joué.";
+                _overlay.SetAbsenceCountdown("✅ Tenu sans esquiver — bien joué.");
                 MarkValidated();
             }
             else
             {
                 _absenceCountdownText.Text = $"Tiens encore {remaining:0.0}s sans esquiver…";
+                _overlay.SetAbsenceCountdown($"Tiens encore {remaining:0.0}s sans esquiver…");
             }
         };
         _absenceTimer.Start();
@@ -408,7 +488,7 @@ public partial class ParcoursWindow : Window
         var hint = new TextBlock
         {
             FontSize = 12,
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             TextWrapping = TextWrapping.Wrap,
             Text = "Rien à taper ici — fais l'action décrite ci-dessus quand tu veux, la leçon se valide toute seule.",
         };
@@ -442,10 +522,10 @@ public partial class ParcoursWindow : Window
             Height = 480,
             Owner = this,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = PanelBg,
+            Background = Theme.BgPanel,
         };
 
-        var list = new ListBox { Background = CardBg, Foreground = TextColor, BorderThickness = new Thickness(0), Margin = new Thickness(12) };
+        var list = new ListBox { Background = Theme.BgCard, Foreground = Theme.TextPrimary, BorderThickness = new Thickness(0), Margin = new Thickness(12) };
         foreach (var lesson in _lessons)
         {
             var done = AppState.IsLessonCompleted(lesson.Id) ? "✓ " : "";
@@ -470,6 +550,27 @@ public partial class ParcoursWindow : Window
     // ------------------------------------------------------------------
     private void OnGlobalKeyDown(int vkCode)
     {
+        if (IsCtrl(vkCode)) _ctrlDown = true;
+        if (IsAlt(vkCode)) _altDown = true;
+        // Ne jamais resynchroniser le modificateur que CET appui vient de presser lui-même —
+        // voir la docstring du bloc de champs ci-dessus (même bug que CLAUDE.md Version 26).
+        if (_ctrlDown && !IsCtrl(vkCode) && !CtrlHeldNow()) _ctrlDown = false;
+        if (_altDown && !IsAlt(vkCode) && !AltHeldNow()) _altDown = false;
+
+        // Vérifiés AVANT le garde CaptureSuspended ci-dessous (même ordre que MainWindow) : le
+        // raccourci de suspension doit rester joignable au clavier pendant qu'on est suspendu,
+        // sinon impossible de reprendre sans le bouton.
+        if (_ctrlDown && _altDown && vkCode == AppState.Settings.LockVk)
+        {
+            Dispatcher.Invoke(AppState.ToggleLock);
+            return;
+        }
+        if (_ctrlDown && _altDown && vkCode == AppState.Settings.SuspendVk)
+        {
+            Dispatcher.Invoke(AppState.ToggleCaptureSuspended);
+            return;
+        }
+
         // Même garde que MainWindow.OnGlobalKeyDown (voir AppState.CaptureSuspended) : le hook est
         // global, donc sans ça n'importe quelle frappe faite ailleurs sur le PC (hors de cette
         // fenêtre, hors du jeu) validerait silencieusement une leçon. Repéré en testant en vrai
@@ -493,7 +594,8 @@ public partial class ParcoursWindow : Window
                 case LessonValidationKind.PressAllOnce:
                     if (lesson.RequiredActionsOnce.Contains(bind.Action) && _pressedOnce.Add(bind.Action))
                     {
-                        if (_chipByAction.TryGetValue(bind.Action, out var chip)) chip.Background = GreenBrush;
+                        if (_chipByAction.TryGetValue(bind.Action, out var chip)) chip.Background = Theme.StateSuccess;
+                        _overlay.MarkActionDone(bind.Action);
                         if (_pressedOnce.Count == lesson.RequiredActionsOnce.Count) MarkValidated();
                     }
                     break;
@@ -517,5 +619,10 @@ public partial class ParcoursWindow : Window
         });
     }
 
-    private void OnGlobalKeyUp(int vkCode) => _pressedVks.Remove(vkCode);
+    private void OnGlobalKeyUp(int vkCode)
+    {
+        if (IsCtrl(vkCode)) _ctrlDown = false;
+        if (IsAlt(vkCode)) _altDown = false;
+        _pressedVks.Remove(vkCode);
+    }
 }

@@ -565,4 +565,27 @@ public static class AppState
         _parcoursProgress.CurrentLessonId = lessonId;
         ParcoursProgressConfig.Save(_parcoursProgress);
     }
+
+    /// <summary>Overlay (MainWindow) et Parcours (ParcoursWindow) sont mutuellement exclusifs
+    /// (2026-08-08, demande explicite : les deux ouvrent des raccourcis Ctrl+Alt+* qui se
+    /// marchent dessus s'ils tournent en même temps — chacun traite indépendamment le même appui
+    /// clavier global, ce qui annule l'effet l'un de l'autre). DashboardWindow consulte ces
+    /// drapeaux avant d'ouvrir l'un pendant que l'autre tourne, et propose de fermer proprement
+    /// celui de trop via les callbacks ci-dessous plutôt que de bloquer sans porte de sortie.</summary>
+    public static bool OverlayRunning { get; set; }
+    public static bool ParcoursRunning { get; set; }
+    public static Action? CloseOverlayRequested { get; set; }
+    public static Action? CloseParcoursRequested { get; set; }
+
+    /// <summary>Remet à zéro toute la progression du Parcours (demande explicite de l'utilisateur,
+    /// 2026-08-08) — vide les leçons validées et le pointeur "reprendre ici". Ne touche à rien
+    /// d'autre (combos, touches, stats) : parcours_progress.json est un fichier séparé, sans
+    /// raison de les coupler (voir le commentaire de tête de cette section).</summary>
+    public static void ResetParcoursProgress()
+    {
+        _completedLessonIds.Clear();
+        _parcoursProgress.CompletedLessonIds = new List<string>();
+        _parcoursProgress.CurrentLessonId = "";
+        ParcoursProgressConfig.Save(_parcoursProgress);
+    }
 }

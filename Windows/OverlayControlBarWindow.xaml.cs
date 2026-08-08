@@ -27,8 +27,10 @@ public partial class OverlayControlBarWindow : Window
     private const double WindowHeight = 40;
     private static readonly TimeSpan CollapseDelay = TimeSpan.FromMilliseconds(500);
 
+    // Alpha volontairement plus opaque que Theme.OverlayPanelBg : contrairement au panneau de
+    // combo passif, cette barre est interactive (survol/clic à la souris), elle doit rester bien
+    // lisible même par-dessus un fond de jeu clair — reste locale plutôt que Theme.OverlayPanelBg.
     private static readonly Brush BarBg = new SolidColorBrush(Color.FromArgb(0xE0, 0x18, 0x17, 0x22));
-    private static readonly Brush AccentGold = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A));
 
     private readonly Action _openPanel;
     private Border _collapsedTab = null!;
@@ -79,7 +81,7 @@ public partial class OverlayControlBarWindow : Window
             Height = 32,
             CornerRadius = new CornerRadius(16),
             Background = BarBg,
-            BorderBrush = AccentGold,
+            BorderBrush = Theme.AccentGold,
             BorderThickness = new Thickness(1),
             Opacity = 0.45,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -89,7 +91,7 @@ public partial class OverlayControlBarWindow : Window
             {
                 Text = "≡",
                 FontSize = 16,
-                Foreground = AccentGold,
+                Foreground = Theme.AccentGold,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
@@ -106,7 +108,7 @@ public partial class OverlayControlBarWindow : Window
         _expandedBorder = new Border
         {
             Background = BarBg,
-            BorderBrush = AccentGold,
+            BorderBrush = Theme.AccentGold,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(18),
             Padding = new Thickness(6, 4, 6, 4),

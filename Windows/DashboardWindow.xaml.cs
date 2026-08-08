@@ -22,13 +22,8 @@ namespace BrawlhallaOverlay;
 /// </summary>
 public partial class DashboardWindow : Window
 {
-    // Palette = ControlPanelWindow + StartupWindow (accent doré cohérent)
-    private static readonly Brush PanelBg = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22));
-    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x27, 0x35));
+    // Palette centralisée dans Core/Theme.cs — seul CardHoverBg reste local (état de survol propre à cette fenêtre)
     private static readonly Brush CardHoverBg = new SolidColorBrush(Color.FromRgb(0x35, 0x31, 0x42));
-    private static readonly Brush TextColor = Brushes.White;
-    private static readonly Brush SubtleText = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA));
-    private static readonly Brush AccentGold = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A));
 
     // Si vraie, une session overlay tourne déjà (ouverte depuis MainWindow via Ctrl+Alt+U/tray/
     // barre de contrôle) : la fourche d'onboarding n'a plus lieu d'être (un revenant en jeu a déjà
@@ -79,15 +74,16 @@ public partial class DashboardWindow : Window
         {
             Text = "Bienvenue !",
             FontSize = 24,
+            FontFamily = Theme.AccentFontFamilyHeavy,
             FontWeight = FontWeights.Bold,
-            Foreground = AccentGold,
+            Foreground = Theme.AccentGold,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
         root.Children.Add(new TextBlock
         {
             Text = "Une seule question pour commencer : tu es plutôt…",
             FontSize = 13,
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 8, 0, 28),
         });
@@ -114,15 +110,15 @@ public partial class DashboardWindow : Window
     {
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
         stack.Children.Add(new TextBlock { Text = emoji, FontSize = 40, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 10) });
-        stack.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.Bold, Foreground = TextColor, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
-        stack.Children.Add(new TextBlock { Text = subtitle, FontSize = 12, Foreground = SubtleText, Margin = new Thickness(0, 6, 0, 0), TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 190 });
+        stack.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.Bold, Foreground = Theme.TextPrimary, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
+        stack.Children.Add(new TextBlock { Text = subtitle, FontSize = 12, Foreground = Theme.TextSubtle, Margin = new Thickness(0, 6, 0, 0), TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 190 });
 
         var border = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x60, 0xE8, 0xC4, 0x4A)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = Theme.CrestMain,
             Padding = new Thickness(20),
             Margin = new Thickness(10),
             Width = 210,
@@ -130,7 +126,7 @@ public partial class DashboardWindow : Window
             Child = stack,
         };
         border.MouseEnter += (_, _) => border.Background = CardHoverBg;
-        border.MouseLeave += (_, _) => border.Background = CardBg;
+        border.MouseLeave += (_, _) => border.Background = Theme.BgCard;
         return border;
     }
 
@@ -161,12 +157,12 @@ public partial class DashboardWindow : Window
         var root = new DockPanel();
 
         var header = new StackPanel { Margin = new Thickness(24, 20, 24, 8) };
-        header.Children.Add(new TextBlock { Text = "Ton personnage", FontSize = 18, FontWeight = FontWeights.Bold, Foreground = AccentGold });
+        header.Children.Add(new TextBlock { Text = "Ton personnage", FontSize = 18, FontFamily = Theme.AccentFontFamily, FontWeight = FontWeights.Bold, Foreground = Theme.AccentGold });
         header.Children.Add(new TextBlock
         {
             Text = "Ses combos vérifiées seront importées automatiquement — pas besoin de cliquer sur un bouton « Importer » séparé.",
             FontSize = 12,
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
         });
@@ -212,11 +208,11 @@ public partial class DashboardWindow : Window
 
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
         stack.Children.Add(image);
-        stack.Children.Add(new TextBlock { Text = legend, FontSize = 11, Foreground = TextColor, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) });
+        stack.Children.Add(new TextBlock { Text = legend, FontSize = 11, Foreground = Theme.TextPrimary, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) });
 
         var tile = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(8),
             Margin = new Thickness(4),
@@ -224,7 +220,7 @@ public partial class DashboardWindow : Window
             Child = stack,
         };
         tile.MouseEnter += (_, _) => tile.Background = CardHoverBg;
-        tile.MouseLeave += (_, _) => tile.Background = CardBg;
+        tile.MouseLeave += (_, _) => tile.Background = Theme.BgCard;
         tile.MouseLeftButtonUp += (_, _) => { _onboardingChosenCharacter = legend; ShowWhatHappensNext(); };
         return tile;
     }
@@ -234,32 +230,38 @@ public partial class DashboardWindow : Window
         RootGrid.Children.Clear();
         var panel = new StackPanel { Margin = new Thickness(32), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 560 };
 
-        panel.Children.Add(new TextBlock { Text = "Voilà ce qui va se passer", FontSize = 20, FontWeight = FontWeights.Bold, Foreground = AccentGold, HorizontalAlignment = HorizontalAlignment.Center });
+        panel.Children.Add(new TextBlock { Text = "Voilà ce qui va se passer", FontSize = 20, FontFamily = Theme.AccentFontFamilyHeavy, FontWeight = FontWeights.Bold, Foreground = Theme.AccentGold, HorizontalAlignment = HorizontalAlignment.Center });
 
         void Bullet(string text)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
-            row.Children.Add(new TextBlock { Text = "•", Foreground = AccentGold, FontSize = 14, Margin = new Thickness(0, 0, 10, 0) });
-            row.Children.Add(new TextBlock { Text = text, Foreground = TextColor, FontSize = 13, TextWrapping = TextWrapping.Wrap, Width = 480 });
+            row.Children.Add(new TextBlock { Text = "•", Foreground = Theme.AccentGold, FontSize = 14, Margin = new Thickness(0, 0, 10, 0) });
+            row.Children.Add(new TextBlock { Text = text, Foreground = Theme.TextPrimary, FontSize = 13, TextWrapping = TextWrapping.Wrap, Width = 480 });
             panel.Children.Add(row);
         }
 
-        Bullet("Cette fenêtre va se fermer et laisser place à un overlay transparent, sans bordure ni bouton — normal, c'est fait pour se superposer au jeu sans le gêner.");
-        Bullet("Pour la retrouver ensuite : l'icône dorée « B » en bas à droite de l'écran (zone de notification Windows), ou le raccourci Ctrl+Alt+U depuis n'importe où.");
-        Bullet("Une petite barre discrète (≡) reste aussi accessible en survolant le coin bas-droit de l'overlay en jeu : elle permet de suspendre la capture ou de rouvrir cet accueil à la souris, sans raccourci clavier à retenir.");
-
         if (_onboardingProfile == "Débutant")
         {
-            Bullet("Tu démarres en mode « Tutoriel » (le seul mode d'affichage de l'app) — sans combo sélectionné pour l'instant, choisis-en un quand tu veux depuis le panneau de contrôle.");
-            Bullet("Une fenêtre « Leçons » s'ouvre à côté : des leçons courtes (tes touches, puis survivre — sauts/esquive/récupération) validées en temps réel pendant que tu joues. Chapitre 0+1 seulement pour l'instant, la suite arrivera plus tard.");
-        }
-        else if (_onboardingChosenCharacter is not null)
-        {
-            Bullet($"Tu démarres directement en mode « Tutoriel » avec les combos de {_onboardingChosenCharacter}, déjà importées et prêtes à être validées en jeu.");
+            // L'overlay et le Parcours sont mutuellement exclusifs (voir AppState.OverlayRunning/
+            // ParcoursRunning) : contrairement aux autres profils, cette fenêtre ne se ferme pas
+            // sur l'overlay mais reste ouverte derrière une fenêtre « Leçons ».
+            Bullet("Une fenêtre « Leçons » va s'ouvrir : des leçons courtes (tes touches, puis survivre — sauts/esquive/récupération, puis frapper, puis bouger) validées en temps réel, avec un bandeau qui reprend les mêmes infos par-dessus le jeu.");
+            Bullet("L'overlay d'entraînement aux combos ne se lance pas en même temps que le Parcours — les deux se disputeraient les mêmes raccourcis clavier. Cet accueil reste ouvert derrière : reviens-y et clique « Lancer en jeu » dès que tu es prêt à passer aux combos, ça fermera le Parcours proprement.");
         }
         else
         {
-            Bullet("Tu démarres en mode « Tutoriel » — tu pourras choisir un personnage et ses combos plus tard depuis le panneau de contrôle (Ctrl+Alt+U).");
+            Bullet("Cette fenêtre va se fermer et laisser place à un overlay transparent, sans bordure ni bouton — normal, c'est fait pour se superposer au jeu sans le gêner.");
+            Bullet("Pour la retrouver ensuite : l'icône dorée « B » en bas à droite de l'écran (zone de notification Windows), ou le raccourci Ctrl+Alt+U depuis n'importe où.");
+            Bullet("Une petite barre discrète (≡) reste aussi accessible en survolant le coin bas-droit de l'overlay en jeu : elle permet de suspendre la capture ou de rouvrir cet accueil à la souris, sans raccourci clavier à retenir.");
+
+            if (_onboardingChosenCharacter is not null)
+            {
+                Bullet($"Tu démarres directement en mode « Tutoriel » avec les combos de {_onboardingChosenCharacter}, déjà importées et prêtes à être validées en jeu.");
+            }
+            else
+            {
+                Bullet("Tu démarres en mode « Tutoriel » — tu pourras choisir un personnage et ses combos plus tard depuis le panneau de contrôle (Ctrl+Alt+U).");
+            }
         }
 
         var launchBtn = new Button
@@ -268,7 +270,7 @@ public partial class DashboardWindow : Window
             Padding = new Thickness(24, 10, 24, 10),
             FontWeight = FontWeights.Bold,
             FontSize = 14,
-            Background = AccentGold,
+            Background = Theme.AccentGold,
             Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22)),
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -307,7 +309,7 @@ public partial class DashboardWindow : Window
     {
         var border = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0xC4, 0x4A)),
             BorderThickness = new Thickness(0, 0, 0, 2),
             Padding = new Thickness(24, 20, 24, 20),
@@ -316,28 +318,50 @@ public partial class DashboardWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal };
 
         // Logo officiel de l'app (Assets/AppLogo.png, déjà utilisé pour l'icône de tray et les
-        // icônes de fenêtre — voir MainWindow.CreateTrayIcon) — remplace un ancien badge "B"
-        // dessiné en texte brut, resté ici sans avoir été mis à jour en même temps que le tray.
-        var logo = new Border
+        // icônes de fenêtre — voir MainWindow.CreateTrayIcon). Badge "losange" (retour
+        // utilisateur : le cadre rond précédent laissait les 4 coins carrés du logo dépasser des
+        // bords du cercle, "immonde" — le logo n'est pas un carré plein, donc à 34px dans un
+        // cercle de 48px son carré source touchait déjà le bord). Remplacé par un cadre en forme
+        // de losange (carré tourné à 45°, `CornerRadius` ne permet pas cette forme) façon taille
+        // de gemme : le cadre tourne, PAS le logo lui-même — sinon l'artwork se retrouverait
+        // affiché de travers. Le logo (élément séparé, non transformé, plus petit que le losange)
+        // reste donc bien droit et entièrement contenu, sans jamais dépasser d'aucun bord.
+        // Le fichier source (2000×2000) a une grosse marge vide autour du blason (mesuré par
+        // scan de pixels : le blason n'occupe que x 395-1510 / y 160-1840, le fond
+        // #181722 — qui est justement Theme.BgPanel — remplit tout le reste) : un simple
+        // Stretch=Uniform du carré entier rendait le blason minuscule et illisible une fois
+        // réduit à la taille du badge. Un ImageBrush avec Viewbox recadre sur le blason (+ une
+        // petite marge) pour qu'il remplisse réellement l'espace du badge.
+        const double outerDiamondSide = 44; // carré avant rotation
+        const double badgeBox = 64; // boîte englobante (diagonale du losange extérieur + marge)
+
+        var logoBadge = new Grid { Width = badgeBox, Height = badgeBox, Margin = new Thickness(0, 0, 16, 0) };
+        logoBadge.Children.Add(new Border
         {
-            Width = 48,
-            Height = 48,
-            CornerRadius = new CornerRadius(24),
-            Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2A)),
-            BorderBrush = AccentGold,
+            Width = outerDiamondSide,
+            Height = outerDiamondSide,
+            Background = Theme.BgPanel,
+            BorderBrush = Theme.AccentGold,
             BorderThickness = new Thickness(2),
-            Margin = new Thickness(0, 0, 16, 0),
-            Child = new Image
+            RenderTransform = new RotateTransform(45),
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        logoBadge.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Width = 26,
+            Height = 30,
+            Fill = new ImageBrush
             {
-                Source = new BitmapImage(new Uri("pack://application:,,,/Assets/AppLogo.png", UriKind.Absolute)),
-                Width = 34,
-                Height = 34,
+                ImageSource = new BitmapImage(new Uri("pack://application:,,,/Assets/AppLogo.png", UriKind.Absolute)),
+                Viewbox = new Rect(0.17, 0.06, 0.62, 0.88),
                 Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
             },
-        };
-        row.Children.Add(logo);
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(logoBadge);
 
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         titles.Children.Add(new TextBlock
@@ -345,7 +369,7 @@ public partial class DashboardWindow : Window
             Text = "Brawlhalla Input Overlay",
             FontSize = 20,
             FontWeight = FontWeights.Bold,
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
         });
         titles.Children.Add(new TextBlock
         {
@@ -353,7 +377,7 @@ public partial class DashboardWindow : Window
                 ? "Change de personnage, d'arme ou de combo — appliqué en direct sur l'overlay en cours."
                 : "Choisis ton personnage, ton arme, un combo et lance l'overlay en jeu.",
             FontSize = 12,
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 2, 0, 0),
         });
@@ -368,14 +392,14 @@ public partial class DashboardWindow : Window
         Text = text,
         FontSize = 14,
         FontWeight = FontWeights.Bold,
-        Foreground = AccentGold,
+        Foreground = Theme.AccentGold,
         Margin = new Thickness(0, 14, 0, 6),
     };
 
     private static TextBlock HelpText(string text) => new()
     {
         Text = text,
-        Foreground = SubtleText,
+        Foreground = Theme.TextSubtle,
         FontSize = 11,
         TextWrapping = TextWrapping.Wrap,
         Margin = new Thickness(0, 4, 0, 0),
@@ -535,7 +559,7 @@ public partial class DashboardWindow : Window
         };
 
         panel.Children.Add(SectionTitle("Combo à afficher"));
-        _combosList = new ListBox { Height = 150, Background = CardBg, Foreground = TextColor, BorderThickness = new Thickness(0) };
+        _combosList = new ListBox { Height = 150, Background = Theme.BgCard, Foreground = Theme.TextPrimary, BorderThickness = new Thickness(0) };
 
         RefreshWeaponOptions();
         RefreshPortrait();
@@ -555,13 +579,13 @@ public partial class DashboardWindow : Window
             Text = "🎓 Leçons — apprends les bases du jeu et de l'app",
             FontSize = 15,
             FontWeight = FontWeights.Bold,
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
         });
         stack.Children.Add(new TextBlock
         {
             Text = "Recommandé avant de te lancer : leçons courtes validées en temps réel (sauts, esquive, récupération...).",
             FontSize = 11,
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             Margin = new Thickness(0, 2, 0, 0),
         });
 
@@ -571,7 +595,7 @@ public partial class DashboardWindow : Window
             Padding = new Thickness(16, 8, 16, 8),
             FontWeight = FontWeights.Bold,
             FontSize = 13,
-            Background = AccentGold,
+            Background = Theme.AccentGold,
             Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22)),
             BorderThickness = new Thickness(0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -581,6 +605,19 @@ public partial class DashboardWindow : Window
         // MainWindow.OpenDashboard, qui géraient déjà ce cas correctement.
         tutorialBtn.Click += (_, _) =>
         {
+            // Mutuellement exclusif avec l'overlay (voir AppState.OverlayRunning/LaunchOverlay
+            // pour le sens inverse) — même raison : les deux traitent indépendamment les mêmes
+            // raccourcis Ctrl+Alt+* sur le même appui clavier global, et s'annulent l'un l'autre.
+            if (AppState.OverlayRunning)
+            {
+                var choice = MessageBox.Show(
+                    "L'overlay est actuellement lancé en jeu. L'overlay et le Parcours ne peuvent pas tourner en même temps (ils se disputent les mêmes raccourcis clavier).\n\nFermer l'overlay et ouvrir le Parcours ?",
+                    "Overlay en cours",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (choice != MessageBoxResult.Yes) return;
+            }
+
             if (_parcours is null || !_parcours.IsLoaded)
             {
                 _parcours = new ParcoursWindow();
@@ -591,6 +628,16 @@ public partial class DashboardWindow : Window
             {
                 if (_parcours.WindowState == WindowState.Minimized) _parcours.WindowState = WindowState.Normal;
                 _parcours.Activate();
+            }
+
+            // Réassigné AVANT de fermer l'overlay : ce Dashboard "in-game" n'a jamais été
+            // Application.MainWindow lui-même (c'est l'overlay qui l'est depuis son lancement) —
+            // fermer l'overlay sans reporter ce rôle ailleurs tuerait l'app entière via
+            // ShutdownMode="OnMainWindowClose" (même piège que LaunchOverlay/CLAUDE.md Version 21).
+            if (AppState.OverlayRunning)
+            {
+                Application.Current.MainWindow = _parcours;
+                AppState.CloseOverlayRequested?.Invoke();
             }
         };
 
@@ -604,10 +651,10 @@ public partial class DashboardWindow : Window
 
         return new Border
         {
-            Background = CardBg,
-            BorderBrush = AccentGold,
+            Background = Theme.BgCard,
+            BorderBrush = Theme.AccentGold,
             BorderThickness = new Thickness(2),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = Theme.CrestMain,
             Padding = new Thickness(16, 14, 16, 14),
             Margin = new Thickness(0, 0, 0, 16),
             Child = grid,
@@ -634,13 +681,13 @@ public partial class DashboardWindow : Window
             Text = $"Reprendre — {combo.Name}",
             FontSize = 15,
             FontWeight = FontWeights.Bold,
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
         });
         stack.Children.Add(new TextBlock
         {
             Text = contextParts.Count > 0 ? string.Join(" · ", contextParts) + " — dernière session" : "Dernière session",
             FontSize = 11,
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             Margin = new Thickness(0, 2, 0, 0),
         });
 
@@ -649,7 +696,7 @@ public partial class DashboardWindow : Window
             Content = "Reprendre ▶",
             Padding = new Thickness(16, 8, 16, 8),
             FontWeight = FontWeights.Bold,
-            Background = AccentGold,
+            Background = Theme.AccentGold,
             Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22)),
             BorderThickness = new Thickness(0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -666,10 +713,10 @@ public partial class DashboardWindow : Window
 
         return new Border
         {
-            Background = CardBg,
-            BorderBrush = AccentGold,
+            Background = Theme.BgCard,
+            BorderBrush = Theme.AccentGold,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = Theme.CrestMain,
             Padding = new Thickness(16, 12, 16, 12),
             Margin = new Thickness(0, 0, 0, 16),
             Child = grid,
@@ -703,7 +750,7 @@ public partial class DashboardWindow : Window
         {
             Text = label,
             FontSize = 9,
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
@@ -712,7 +759,7 @@ public partial class DashboardWindow : Window
 
         var tile = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(4),
             Margin = new Thickness(3),
@@ -770,7 +817,7 @@ public partial class DashboardWindow : Window
     {
         var border = new Border
         {
-            Background = CardBg,
+            Background = Theme.BgCard,
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0xC4, 0x4A)),
             BorderThickness = new Thickness(0, 2, 0, 0),
             Padding = new Thickness(24, 14, 24, 14),
@@ -800,7 +847,7 @@ public partial class DashboardWindow : Window
             Padding = new Thickness(20, 8, 20, 8),
             FontWeight = FontWeights.Bold,
             FontSize = 14,
-            Background = AccentGold,
+            Background = Theme.AccentGold,
             Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22)),
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -830,6 +877,19 @@ public partial class DashboardWindow : Window
 
     private void LaunchOverlay()
     {
+        // Mutuellement exclusif avec le Parcours (voir AppState.ParcoursRunning) — seulement
+        // pertinent quand on s'apprête à instancier un NOUVEAU MainWindow (pas en mode in-game, où
+        // un overlay tourne déjà et coexistait déjà avec un Parcours ouvert avant ce correctif).
+        if (!_inGameMode && AppState.ParcoursRunning)
+        {
+            var choice = MessageBox.Show(
+                "Le Parcours (leçons) est actuellement ouvert. L'overlay et le Parcours ne peuvent pas tourner en même temps (ils se disputent les mêmes raccourcis clavier).\n\nFermer le Parcours et lancer l'overlay ?",
+                "Parcours en cours",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (choice != MessageBoxResult.Yes) return;
+        }
+
         // -1 = la ligne « — Aucun combo sélectionné — » : c'est un choix explicite de l'utilisateur,
         // pas une absence de sélection. L'ancienne condition (`if (chosen >= 0)`) l'ignorait
         // simplement, donc l'option existait mais n'avait aucun effet (audit 2026-08-07 §F1).
@@ -844,6 +904,11 @@ public partial class DashboardWindow : Window
             Application.Current.MainWindow = overlay;
             overlay.Show();
         }
+
+        // Fermé APRÈS avoir réassigné Application.MainWindow ci-dessus (si un Parcours tournait
+        // en tant que seule fenêtre "principale" — voir CompleteOnboardingAndLaunch — le fermer
+        // avant cette réassignation tuerait l'app entière via ShutdownMode="OnMainWindowClose").
+        if (AppState.ParcoursRunning) AppState.CloseParcoursRequested?.Invoke();
 
         _controlPanel?.Close();
         Close();
@@ -867,16 +932,27 @@ public partial class DashboardWindow : Window
             if (filtered.Count > 0) AppState.SetActiveCombo(filtered[0]);
         }
 
-        var overlay = new MainWindow();
-        Application.Current.MainWindow = overlay;
-        overlay.Show();
-
+        // Overlay et Parcours sont mutuellement exclusifs (voir AppState.OverlayRunning/
+        // ParcoursRunning) — le profil Débutant ouvrait auparavant les deux "en parallèle", ce
+        // qui n'est plus permis (2026-08-08, demande explicite de l'utilisateur). Démarre
+        // maintenant dans le Parcours seul : la voie recommandée pour apprendre les bases avant
+        // de s'entraîner aux combos. Cet accueil reste ouvert (BuildMainFlow, pas Close()) plutôt
+        // que fermé sur le Parcours comme seule fenêtre "principale" — sinon un simple clic sur sa
+        // croix tuerait l'app entière (ShutdownMode="OnMainWindowClose"), alors que fermer une
+        // fenêtre de leçons ne devrait surprendre personne. "Lancer en jeu" reste accessible ici
+        // dès que l'utilisateur est prêt à passer aux combos (voir LaunchOverlay, qui referme
+        // proprement le Parcours à ce moment-là).
         if (_onboardingProfile == "Débutant")
         {
             var parcours = new ParcoursWindow();
             parcours.Show();
+            BuildMainFlow();
+            return;
         }
 
+        var overlay = new MainWindow();
+        Application.Current.MainWindow = overlay;
+        overlay.Show();
         Close();
     }
 }

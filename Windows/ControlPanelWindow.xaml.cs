@@ -19,14 +19,6 @@ namespace BrawlhallaOverlay;
 public partial class ControlPanelWindow : Window
 {
     private static readonly string[] TabNames = { "Général", "Touches", "Périphériques", "Combos", "Apparence", "À propos" };
-    // Fond bleu-nuit/violet sombre (au lieu du gris neutre d'origine) + accent doré
-    // repris de la tray icon (#E8C44A) : signature de marque cohérente avec l'overlay
-    // et le motif "écusson" de l'UI Brawlhalla — voir Brawhl.md section 4/7.
-    private static readonly Brush PanelBg = new SolidColorBrush(Color.FromRgb(0x18, 0x17, 0x22));
-    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x27, 0x35));
-    private static readonly Brush TextColor = Brushes.White;
-    private static readonly Brush SubtleText = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA));
-    private static readonly Brush AccentGold = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A));
 
     private ContentControl _content = null!;
     private ListBox _nav = null!;
@@ -46,9 +38,9 @@ public partial class ControlPanelWindow : Window
 
         _nav = new ListBox
         {
-            Background = PanelBg,
+            Background = Theme.BgPanel,
             BorderThickness = new Thickness(0),
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             FontSize = 14,
             Padding = new Thickness(0, 12, 0, 0),
         };
@@ -64,8 +56,8 @@ public partial class ControlPanelWindow : Window
         navItemStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(3, 0, 0, 0)));
         navItemStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.Transparent));
         var selectedTrigger = new Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true };
-        selectedTrigger.Setters.Add(new Setter(Control.BorderBrushProperty, AccentGold));
-        selectedTrigger.Setters.Add(new Setter(Control.BackgroundProperty, CardBg));
+        selectedTrigger.Setters.Add(new Setter(Control.BorderBrushProperty, Theme.AccentGold));
+        selectedTrigger.Setters.Add(new Setter(Control.BackgroundProperty, Theme.BgCard));
         navItemStyle.Triggers.Add(selectedTrigger);
         _nav.ItemContainerStyle = navItemStyle;
 
@@ -133,14 +125,14 @@ public partial class ControlPanelWindow : Window
         Text = text,
         FontSize = 18,
         FontWeight = FontWeights.Bold,
-        Foreground = AccentGold,
+        Foreground = Theme.AccentGold,
         Margin = new Thickness(0, 0, 0, 14),
     };
 
     private static TextBlock Label(string text) => new()
     {
         Text = text,
-        Foreground = TextColor,
+        Foreground = Theme.TextPrimary,
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(0, 0, 10, 0),
     };
@@ -148,7 +140,7 @@ public partial class ControlPanelWindow : Window
     private static TextBlock HelpText(string text) => new()
     {
         Text = text,
-        Foreground = SubtleText,
+        Foreground = Theme.TextSubtle,
         FontSize = 11,
         TextWrapping = TextWrapping.Wrap,
         Margin = new Thickness(0, 2, 0, 14),
@@ -169,7 +161,7 @@ public partial class ControlPanelWindow : Window
 
         var advancedPanel = new StackPanel();
 
-        advancedPanel.Children.Add(new TextBlock { Text = "Profil de touches", Foreground = TextColor, Margin = new Thickness(0, 0, 0, 4) });
+        advancedPanel.Children.Add(new TextBlock { Text = "Profil de touches", Foreground = Theme.TextPrimary, Margin = new Thickness(0, 0, 0, 4) });
         var profileRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
         var profileCombo = new ComboBox { Width = 160, ItemsSource = KeyBindConfig.ListProfiles(), SelectedItem = AppState.Settings.ActiveProfile, Margin = new Thickness(0, 0, 6, 0) };
         profileCombo.SelectionChanged += (_, _) =>
@@ -232,7 +224,7 @@ public partial class ControlPanelWindow : Window
         var startupCheck = new CheckBox
         {
             Content = "Lancer automatiquement au démarrage de Windows",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = StartupConfig.IsEnabled(),
             Margin = new Thickness(0, 4, 0, 4),
         };
@@ -244,7 +236,7 @@ public partial class ControlPanelWindow : Window
         // actif + combos + apparence en un seul fichier, pour changer de PC d'un coup plutôt que
         // de recréer profils et combos séparément (seul l'export/import combo par combo existait
         // jusque-là — ExportSelectedCombo/ImportCombo ci-dessous, gardés inchangés).
-        advancedPanel.Children.Add(new TextBlock { Text = "Profil complet (touches + combos + apparence)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
+        advancedPanel.Children.Add(new TextBlock { Text = "Profil complet (touches + combos + apparence)", Foreground = Theme.TextPrimary, Margin = new Thickness(0, 16, 0, 4) });
         var bundleRow = new StackPanel { Orientation = Orientation.Horizontal };
         var bundleExportBtn = new Button { Content = "Exporter tout", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 8, 0) };
         bundleExportBtn.Click += (_, _) => ExportProfileBundle();
@@ -259,7 +251,7 @@ public partial class ControlPanelWindow : Window
         // précédent était figé sur Ctrl+Alt+K sans équivalent clavier pour "précédente", qui
         // n'existait qu'à la manette). Seule la touche finale change ; le préfixe Ctrl+Alt reste
         // fixe comme tous les autres raccourcis pour éviter toute collision avec le jeu.
-        advancedPanel.Children.Add(new TextBlock { Text = "Raccourcis clavier globaux (Ctrl+Alt+*)", Foreground = TextColor, Margin = new Thickness(0, 16, 0, 4) });
+        advancedPanel.Children.Add(new TextBlock { Text = "Raccourcis clavier globaux (Ctrl+Alt+*)", Foreground = Theme.TextPrimary, Margin = new Thickness(0, 16, 0, 4) });
         advancedPanel.Children.Add(HelpText("Reconfigurables un par un pour éviter une collision avec un autre logiciel (OBS, Discord, un launcher...) sans devoir recompiler. Le préfixe Ctrl+Alt reste fixe. Clique directement sur la touche affichée pour la réassigner."));
 
         // Toutes les touches finales actuellement utilisées par un raccourci global, pour détecter
@@ -283,9 +275,9 @@ public partial class ControlPanelWindow : Window
             var keyBtn = new Button
             {
                 Content = $"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(getVk())}",
-                Foreground = TextColor,
-                Background = CardBg,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x40, 0x55)),
+                Foreground = Theme.TextPrimary,
+                Background = Theme.BgCard,
+                BorderBrush = Theme.BorderCard,
                 BorderThickness = new Thickness(1),
                 Width = 130,
                 Padding = new Thickness(0, 5, 0, 5),
@@ -330,7 +322,7 @@ public partial class ControlPanelWindow : Window
         var keepStreakCheck = new CheckBox
         {
             Content = "Garder la série de réussites même après un combo raté",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.KeepStreakOnFail,
             Margin = new Thickness(0, 16, 0, 4),
         };
@@ -341,7 +333,7 @@ public partial class ControlPanelWindow : Window
         var soundCheck = new CheckBox
         {
             Content = "Bips de succès/échec en mode Tutoriel",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.SoundEnabled,
             Margin = new Thickness(0, 4, 0, 4),
         };
@@ -352,7 +344,7 @@ public partial class ControlPanelWindow : Window
         var chainCheck = new CheckBox
         {
             Content = "Enchaîner automatiquement vers le combo suivant après réussite",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.ChainCombos,
             Margin = new Thickness(0, 4, 0, 4),
         };
@@ -382,7 +374,7 @@ public partial class ControlPanelWindow : Window
         var autoHideCheck = new CheckBox
         {
             Content = "Estomper le panneau après une période d'inactivité",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.AutoHideEnabled,
             Margin = new Thickness(0, 16, 0, 4),
         };
@@ -412,7 +404,7 @@ public partial class ControlPanelWindow : Window
         var quizCheck = new CheckBox
         {
             Content = "Cacher les étapes (mémorisation) — masque les étapes pas encore jouées du combo",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.QuizMode,
             Margin = new Thickness(0, 4, 0, 4),
         };
@@ -427,12 +419,12 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(revealRow);
         panel.Children.Add(HelpText("Force à se souvenir du combo plutôt que de le lire. Ctrl+Alt+I (en jeu) ou ce bouton révèlent temporairement (3s) les étapes masquées."));
 
-        var gamepadStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 8, 0, 4) };
+        var gamepadStatus = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 8, 0, 4) };
         gamepadStatus.Text = AppState.Gamepad.Connected ? "Manette détectée." : "Aucune manette détectée (facultatif — voir l'onglet Touches pour assigner des boutons).";
         panel.Children.Add(gamepadStatus);
 
         advancedPanel.Children.Add(SectionTitle("Session"));
-        var sessionInfo = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap };
+        var sessionInfo = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 0, 0, 8), TextWrapping = TextWrapping.Wrap };
         UpdateSessionInfo(sessionInfo);
         advancedPanel.Children.Add(sessionInfo);
 
@@ -454,7 +446,7 @@ public partial class ControlPanelWindow : Window
         // place le disculpait explicitement.
         advancedPanel.Children.Add(HelpText("⚠ Ce réglage CONDITIONNE la validation des combos : quand la zone surveillée est active, un combo n'est compté comme réussi que si le HUD confirme un hit pour chaque coup porté. Il surveille une petite zone du HUD (dégâts de l'ADVERSAIRE) et détecte qu'elle a changé — aucun montant n'est lu. Sécurité intégrée : tant que la zone n'a rien montré de vivant (mauvaise résolution, jeu fermé, HUD ailleurs), la validation N'EST PAS conditionnée et l'app se comporte comme si ce réglage était éteint. Nécessite \"Nombre de dégâts\" activé dans les réglages Brawlhalla, et un calibrage par résolution d'écran."));
 
-        var hudRoiStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 4) };
+        var hudRoiStatus = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 0, 0, 4) };
         void UpdateHudRoiStatus()
         {
             if (!AppState.Settings.HudRoiCalibrated)
@@ -479,7 +471,7 @@ public partial class ControlPanelWindow : Window
         var hudEnabledCheck = new CheckBox
         {
             Content = "Activer la détection de hit",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.HudDetectionEnabled,
             IsEnabled = AppState.Settings.HudRoiCalibrated,
             Margin = new Thickness(0, 4, 0, 4),
@@ -538,7 +530,7 @@ public partial class ControlPanelWindow : Window
         // vérifier que le calibrage vise la bonne zone était d'attendre un hit en jeu — demande
         // explicite de l'utilisateur. S'abonne à Sampled (levé à chaque capture, changement ou
         // non), désabonné avec le reste de l'onglet.
-        var hudLiveText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 12), FontFamily = new FontFamily("Consolas") };
+        var hudLiveText = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 0, 0, 12), FontFamily = new FontFamily("Consolas") };
         hudLiveText.Text = AppState.Settings.HudDetectionEnabled ? "En attente d'une lecture…" : "Inactif (coche \"Activer la détection de hit\" pour voir un retour en direct).";
         advancedPanel.Children.Add(hudLiveText);
         void HudSampledHandler(double ratio) => Dispatcher.Invoke(() =>
@@ -550,7 +542,7 @@ public partial class ControlPanelWindow : Window
 
         advancedPanel.Children.Add(HelpText("Palier de dégâts par couleur : lit la couleur de la barre sous l'icône ADVERSAIRE (Blanc/Jaune/Orange/Rouge/Noir, les paliers officiels 0/50/100/150/200%) — aucun réglage de jeu requis, contrairement à la détection de hit ci-dessus."));
 
-        var hudTierRoiStatus = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 4) };
+        var hudTierRoiStatus = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 0, 0, 4) };
         void UpdateHudTierRoiStatus()
         {
             hudTierRoiStatus.Text = AppState.Settings.HudTierRoiCalibrated
@@ -563,7 +555,7 @@ public partial class ControlPanelWindow : Window
         var hudTierEnabledCheck = new CheckBox
         {
             Content = "Activer le palier de dégâts par couleur",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsChecked = AppState.Settings.HudTierDetectionEnabled,
             IsEnabled = AppState.Settings.HudTierRoiCalibrated,
             Margin = new Thickness(0, 4, 0, 4),
@@ -599,8 +591,8 @@ public partial class ControlPanelWindow : Window
         // Même principe que le retour en direct de la détection de hit ci-dessus : un carré de
         // la couleur réellement lue + le palier déduit, mis à jour à chaque capture.
         var hudTierLiveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 12) };
-        var hudTierSwatch = new Border { Width = 20, Height = 20, Margin = new Thickness(0, 0, 8, 0), BorderBrush = SubtleText, BorderThickness = new Thickness(1), Background = Brushes.Transparent };
-        var hudTierLiveText = new TextBlock { Foreground = SubtleText, FontFamily = new FontFamily("Consolas"), VerticalAlignment = VerticalAlignment.Center };
+        var hudTierSwatch = new Border { Width = 20, Height = 20, Margin = new Thickness(0, 0, 8, 0), BorderBrush = Theme.TextSubtle, BorderThickness = new Thickness(1), Background = Brushes.Transparent };
+        var hudTierLiveText = new TextBlock { Foreground = Theme.TextSubtle, FontFamily = new FontFamily("Consolas"), VerticalAlignment = VerticalAlignment.Center };
         hudTierLiveText.Text = AppState.Settings.HudTierDetectionEnabled ? "En attente d'une lecture…" : "Inactif (coche \"Activer le palier de dégâts par couleur\" pour voir un retour en direct).";
         hudTierLiveRow.Children.Add(hudTierSwatch);
         hudTierLiveRow.Children.Add(hudTierLiveText);
@@ -621,7 +613,7 @@ public partial class ControlPanelWindow : Window
         var advancedExpander = new Expander
         {
             Header = "Réglages avancés",
-            Foreground = TextColor,
+            Foreground = Theme.TextPrimary,
             IsExpanded = false,
             Margin = new Thickness(0, 20, 0, 0),
             Content = advancedPanel,
@@ -732,7 +724,7 @@ public partial class ControlPanelWindow : Window
             {
                 if (conflicted.Contains(keysBtn))
                 {
-                    keysBtn.BorderBrush = new SolidColorBrush(Color.FromRgb(0xE7, 0x4C, 0x3C));
+                    keysBtn.BorderBrush = Theme.StateFail;
                     keysBtn.BorderThickness = new Thickness(2);
                     keysBtn.ToolTip = "Cette touche est aussi utilisée par une autre action — un seul bouton gagnera à l'enregistrement.";
                 }
@@ -757,9 +749,9 @@ public partial class ControlPanelWindow : Window
                 Padding = new Thickness(10, 5, 10, 5),
                 Margin = new Thickness(2),
                 MinWidth = 90,
-                Background = CardBg,
-                Foreground = TextColor,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x40, 0x55)),
+                Background = Theme.BgCard,
+                Foreground = Theme.TextPrimary,
+                BorderBrush = Theme.BorderCard,
                 BorderThickness = new Thickness(1),
                 Cursor = System.Windows.Input.Cursors.Hand,
                 ToolTip = tooltip,
@@ -776,7 +768,7 @@ public partial class ControlPanelWindow : Window
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
 
-            var actionText = new TextBlock { Text = bind.Action, Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center };
+            var actionText = new TextBlock { Text = bind.Action, Foreground = Theme.TextPrimary, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(actionText, 0);
             row.Children.Add(actionText);
 
@@ -828,7 +820,7 @@ public partial class ControlPanelWindow : Window
                 Padding = new Thickness(0),
                 Margin = new Thickness(2),
                 Background = Brushes.Transparent,
-                Foreground = SubtleText,
+                Foreground = Theme.TextSubtle,
                 BorderThickness = new Thickness(0),
                 Cursor = System.Windows.Input.Cursors.Hand,
                 ToolTip = "Retirer le bouton manette assigné.",
@@ -1060,10 +1052,10 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(HelpText("Diagnostic en direct, indépendant des touches assignées : confirme que le clavier/la manette sont bien lus par l'app avant de chercher un problème de binding. Si une manette reste \"Non détectée\" ici alors que Windows la voit, elle ne parle probablement pas XInput (cas fréquent des manettes PlayStation branchées sans pilote XInput type DS4Windows) — l'app ne peut lire que du XInput (comme l'immense majorité des overlays d'input)."));
 
         // --- Clavier ---
-        panel.Children.Add(new TextBlock { Text = "Clavier", Foreground = TextColor, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 4) });
+        panel.Children.Add(new TextBlock { Text = "Clavier", Foreground = Theme.TextPrimary, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 4) });
         var keyboardStatus = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(0x58, 0xD6, 0x8D)), Text = "Hook actif — appuie sur une touche pour tester." };
         panel.Children.Add(keyboardStatus);
-        var lastKeyText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 4, 0, 0), Text = "Dernière touche détectée : —" };
+        var lastKeyText = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 4, 0, 0), Text = "Dernière touche détectée : —" };
         panel.Children.Add(lastKeyText);
 
         void OnKeyDown(int vk)
@@ -1074,7 +1066,7 @@ public partial class ControlPanelWindow : Window
         AppState.Hook.KeyDown += OnKeyDown;
 
         // --- Manette ---
-        panel.Children.Add(new TextBlock { Text = "Manette (XInput)", Foreground = TextColor, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 20, 0, 4) });
+        panel.Children.Add(new TextBlock { Text = "Manette (XInput)", Foreground = Theme.TextPrimary, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 20, 0, 4) });
 
         var gamepadStatus = new TextBlock { FontWeight = FontWeights.SemiBold };
         panel.Children.Add(gamepadStatus);
@@ -1085,13 +1077,13 @@ public partial class ControlPanelWindow : Window
         {
             var tile = new Border
             {
-                Background = CardBg,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x40, 0x55)),
+                Background = Theme.BgCard,
+                BorderBrush = Theme.BorderCard,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(10, 6, 10, 6),
                 Margin = new Thickness(0, 0, 6, 6),
-                Child = new TextBlock { Text = name, Foreground = SubtleText },
+                Child = new TextBlock { Text = name, Foreground = Theme.TextSubtle },
             };
             tilesByFlag[flag] = tile;
             buttonsWrap.Children.Add(tile);
@@ -1101,13 +1093,13 @@ public partial class ControlPanelWindow : Window
         var triggersRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         var ltBar = new ProgressBar { Minimum = 0, Maximum = 255, Width = 140, Height = 12, Margin = new Thickness(0, 0, 16, 0) };
         var rtBar = new ProgressBar { Minimum = 0, Maximum = 255, Width = 140, Height = 12 };
-        triggersRow.Children.Add(new TextBlock { Text = "LT ", Foreground = SubtleText, VerticalAlignment = VerticalAlignment.Center });
+        triggersRow.Children.Add(new TextBlock { Text = "LT ", Foreground = Theme.TextSubtle, VerticalAlignment = VerticalAlignment.Center });
         triggersRow.Children.Add(ltBar);
-        triggersRow.Children.Add(new TextBlock { Text = "  RT ", Foreground = SubtleText, VerticalAlignment = VerticalAlignment.Center });
+        triggersRow.Children.Add(new TextBlock { Text = "  RT ", Foreground = Theme.TextSubtle, VerticalAlignment = VerticalAlignment.Center });
         triggersRow.Children.Add(rtBar);
         panel.Children.Add(triggersRow);
 
-        var sticksText = new TextBlock { Foreground = SubtleText, Margin = new Thickness(0, 8, 0, 0), Text = "Stick gauche : (0, 0)   Stick droit : (0, 0)" };
+        var sticksText = new TextBlock { Foreground = Theme.TextSubtle, Margin = new Thickness(0, 8, 0, 0), Text = "Stick gauche : (0, 0)   Stick droit : (0, 0)" };
         panel.Children.Add(sticksText);
 
         void RefreshConnectionUi(bool connected)
@@ -1120,8 +1112,8 @@ public partial class ControlPanelWindow : Window
             else
             {
                 gamepadStatus.Text = "Non détectée";
-                gamepadStatus.Foreground = new SolidColorBrush(Color.FromRgb(0xE7, 0x4C, 0x3C));
-                foreach (var tile in tilesByFlag.Values) tile.Background = CardBg;
+                gamepadStatus.Foreground = Theme.StateFail;
+                foreach (var tile in tilesByFlag.Values) tile.Background = Theme.BgCard;
                 ltBar.Value = 0;
                 rtBar.Value = 0;
                 sticksText.Text = "Stick gauche : (0, 0)   Stick droit : (0, 0)";
@@ -1139,8 +1131,8 @@ public partial class ControlPanelWindow : Window
                 foreach (var (flag, tile) in tilesByFlag)
                 {
                     var held = (snapshot.Buttons & flag) != 0;
-                    tile.Background = held ? new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A)) : CardBg;
-                    if (tile.Child is TextBlock tb) tb.Foreground = held ? Brushes.Black : SubtleText;
+                    tile.Background = held ? Theme.AccentGold : Theme.BgCard;
+                    if (tile.Child is TextBlock tb) tb.Foreground = held ? Brushes.Black : Theme.TextSubtle;
                 }
                 ltBar.Value = snapshot.LeftTrigger;
                 rtBar.Value = snapshot.RightTrigger;
@@ -1176,7 +1168,7 @@ public partial class ControlPanelWindow : Window
         // FilteredComboIndices), au lieu de croiser arme et légend comme deux filtres indépendants
         // sans lien entre eux (un légend n'a que 2 armes précises, pas 15 au hasard).
         var characterRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        characterRow.Children.Add(new TextBlock { Text = "Personnage : ", Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+        characterRow.Children.Add(new TextBlock { Text = "Personnage : ", Foreground = Theme.TextPrimary, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
 
         var characterItems = new List<string> { "Tous les personnages" };
         characterItems.AddRange(LegendComboPresets.Legends);
@@ -1189,7 +1181,7 @@ public partial class ControlPanelWindow : Window
         panel.Children.Add(HelpText("Restreint la liste ci-dessous, le sous-filtre d'arme et le cycle Ctrl+Alt+K à ce personnage. « Tous les personnages » repasse en filtre par arme seule, sans notion de perso."));
 
         var weaponRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        weaponRow.Children.Add(new TextBlock { Text = "Arme : ", Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+        weaponRow.Children.Add(new TextBlock { Text = "Arme : ", Foreground = Theme.TextPrimary, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
         _weaponFilterCombo = new ComboBox { Width = 220, Margin = new Thickness(0, 0, 6, 0) };
         weaponRow.Children.Add(_weaponFilterCombo);
 
@@ -1277,7 +1269,7 @@ public partial class ControlPanelWindow : Window
         // Créée avant le premier RefreshWeaponFilterOptions() : celui-ci fixe SelectedItem sur
         // _weaponFilterCombo, ce qui déclenche son SelectionChanged synchroniquement et donc
         // RefreshCombosList() — qui a besoin que _combosList existe déjà.
-        _combosList = new ListBox { Height = 200, Background = CardBg, Foreground = TextColor, BorderThickness = new Thickness(0) };
+        _combosList = new ListBox { Height = 200, Background = Theme.BgCard, Foreground = Theme.TextPrimary, BorderThickness = new Thickness(0) };
 
         RefreshWeaponFilterOptions();
         RefreshCombosList();
@@ -1586,7 +1578,7 @@ public partial class ControlPanelWindow : Window
                 hint = $"Aucun combo pour « {filter} ». Clique « Importer les 5 combos de cette arme » ci-dessus, ou choisis « Toutes les armes » pour voir les autres combos.";
             _combosList.Items.Add(new ListBoxItem
             {
-                Content = new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, Foreground = SubtleText },
+                Content = new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, Foreground = Theme.TextSubtle },
                 IsEnabled = false,
                 Padding = new Thickness(6),
             });
@@ -1663,7 +1655,7 @@ public partial class ControlPanelWindow : Window
 
         panel.Children.Add(Label("Échelle"));
         var scaleSlider = new Slider { Minimum = 0.5, Maximum = 2.0, Value = AppState.Settings.Scale, Width = 300, HorizontalAlignment = HorizontalAlignment.Left, TickFrequency = 0.1 };
-        var scaleValue = new TextBlock { Foreground = TextColor, Margin = new Thickness(10, 0, 0, 0), Text = $"{AppState.Settings.Scale:0.00}x" };
+        var scaleValue = new TextBlock { Foreground = Theme.TextPrimary, Margin = new Thickness(10, 0, 0, 0), Text = $"{AppState.Settings.Scale:0.00}x" };
         var scaleRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 14) };
         scaleRow.Children.Add(scaleSlider);
         scaleRow.Children.Add(scaleValue);
@@ -1677,7 +1669,7 @@ public partial class ControlPanelWindow : Window
 
         panel.Children.Add(Label("Opacité"));
         var opacitySlider = new Slider { Minimum = 0.2, Maximum = 1.0, Value = AppState.Settings.Opacity, Width = 300, HorizontalAlignment = HorizontalAlignment.Left, TickFrequency = 0.05 };
-        var opacityValue = new TextBlock { Foreground = TextColor, Margin = new Thickness(10, 0, 0, 0), Text = $"{AppState.Settings.Opacity * 100:0}%" };
+        var opacityValue = new TextBlock { Foreground = Theme.TextPrimary, Margin = new Thickness(10, 0, 0, 0), Text = $"{AppState.Settings.Opacity * 100:0}%" };
         var opacityRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 14) };
         opacityRow.Children.Add(opacitySlider);
         opacityRow.Children.Add(opacityValue);
@@ -1722,10 +1714,10 @@ public partial class ControlPanelWindow : Window
     {
         var panel = new StackPanel();
         panel.Children.Add(SectionTitle("À propos"));
-        panel.Children.Add(new TextBlock { Text = "Brawlhalla Input Overlay", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) });
-        panel.Children.Add(new TextBlock { Text = "Mode Tutoriel + Panneau de contrôle", Foreground = SubtleText, Margin = new Thickness(0, 0, 0, 20) });
+        panel.Children.Add(new TextBlock { Text = "Brawlhalla Input Overlay", Foreground = Theme.TextPrimary, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) });
+        panel.Children.Add(new TextBlock { Text = "Mode Tutoriel + Panneau de contrôle", Foreground = Theme.TextSubtle, Margin = new Thickness(0, 0, 0, 20) });
 
-        panel.Children.Add(new TextBlock { Text = "Raccourcis clavier (reconfigurables : onglet Général, réglages avancés)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) });
+        panel.Children.Add(new TextBlock { Text = "Raccourcis clavier (reconfigurables : onglet Général, réglages avancés)", Foreground = Theme.TextPrimary, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) });
         foreach (var (keys, desc) in new[]
         {
             ($"Ctrl+Alt+{System.Windows.Input.KeyInterop.KeyFromVirtualKey(AppState.Settings.LockVk)}", "Verrouiller / déverrouiller l'overlay"),
@@ -1739,12 +1731,12 @@ public partial class ControlPanelWindow : Window
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
-            row.Children.Add(new TextBlock { Text = keys, Foreground = TextColor, FontFamily = new FontFamily("Consolas"), Width = 110 });
-            row.Children.Add(new TextBlock { Text = desc, Foreground = SubtleText });
+            row.Children.Add(new TextBlock { Text = keys, Foreground = Theme.TextPrimary, FontFamily = new FontFamily("Consolas"), Width = 110 });
+            row.Children.Add(new TextBlock { Text = desc, Foreground = Theme.TextSubtle });
             panel.Children.Add(row);
         }
 
-        panel.Children.Add(new TextBlock { Text = "Raccourcis manette (Start + bouton)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
+        panel.Children.Add(new TextBlock { Text = "Raccourcis manette (Start + bouton)", Foreground = Theme.TextPrimary, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
         foreach (var (chord, desc) in new[]
         {
             ("Start + RB", "Combo suivante"),
@@ -1754,13 +1746,13 @@ public partial class ControlPanelWindow : Window
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
-            row.Children.Add(new TextBlock { Text = chord, Foreground = TextColor, FontFamily = new FontFamily("Consolas"), Width = 110 });
-            row.Children.Add(new TextBlock { Text = desc, Foreground = SubtleText });
+            row.Children.Add(new TextBlock { Text = chord, Foreground = Theme.TextPrimary, FontFamily = new FontFamily("Consolas"), Width = 110 });
+            row.Children.Add(new TextBlock { Text = desc, Foreground = Theme.TextSubtle });
             panel.Children.Add(row);
         }
         panel.Children.Add(HelpText("Fonctionne uniquement si les boutons manette utilisés (LB/RB/X/Y/Back) ne sont pas déjà réassignés à une action de jeu dans l'onglet Touches — sinon les deux se déclenchent en même temps quand Start est maintenu."));
 
-        panel.Children.Add(new TextBlock { Text = "Glossaire (FR ↔ notation communautaire)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
+        panel.Children.Add(new TextBlock { Text = "Glossaire (FR ↔ notation communautaire)", Foreground = Theme.TextPrimary, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
         panel.Children.Add(HelpText("Les guides Brawlhalla et la communauté utilisent leur propre notation (dLight, nSig, GC...) — voici la correspondance avec les noms d'action de cette app."));
         foreach (var (fr, notation) in new[]
         {
@@ -1773,16 +1765,16 @@ public partial class ControlPanelWindow : Window
         })
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
-            row.Children.Add(new TextBlock { Text = fr, Foreground = TextColor, Width = 220, TextWrapping = TextWrapping.Wrap });
-            row.Children.Add(new TextBlock { Text = notation, Foreground = SubtleText, Width = 300, TextWrapping = TextWrapping.Wrap });
+            row.Children.Add(new TextBlock { Text = fr, Foreground = Theme.TextPrimary, Width = 220, TextWrapping = TextWrapping.Wrap });
+            row.Children.Add(new TextBlock { Text = notation, Foreground = Theme.TextSubtle, Width = 300, TextWrapping = TextWrapping.Wrap });
             panel.Children.Add(row);
         }
 
-        panel.Children.Add(new TextBlock { Text = "Icônes", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
+        panel.Children.Add(new TextBlock { Text = "Icônes", Foreground = Theme.TextPrimary, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 20, 0, 6) });
         panel.Children.Add(new TextBlock
         {
             Text = "Icônes du mode Tutoriel par Lorc et Delapouite, sous licence CC BY 3.0. Disponibles sur game-icons.net.",
-            Foreground = SubtleText,
+            Foreground = Theme.TextSubtle,
             TextWrapping = TextWrapping.Wrap,
         });
 
@@ -1801,11 +1793,11 @@ public partial class ControlPanelWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
-            Background = PanelBg,
+            Background = Theme.BgPanel,
         };
 
         var root = new StackPanel { Margin = new Thickness(16) };
-        root.Children.Add(new TextBlock { Text = message, Foreground = TextColor, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
+        root.Children.Add(new TextBlock { Text = message, Foreground = Theme.TextPrimary, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
         var input = new TextBox { Margin = new Thickness(0, 0, 0, 14) };
         root.Children.Add(input);
 

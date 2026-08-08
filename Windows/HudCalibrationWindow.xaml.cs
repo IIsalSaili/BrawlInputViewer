@@ -55,7 +55,9 @@ public partial class HudCalibrationWindow : Window
         _hint = new TextBlock
         {
             Text = _instructions,
-            Foreground = System.Windows.Media.Brushes.White,
+            Foreground = Theme.TextPrimary,
+            // Alpha plus opaque que Theme.OverlayPanelBg : ce texte doit rester lisible en plein
+            // écran par-dessus n'importe quel fond de jeu pendant le calibrage, reste local.
             Background = new SolidColorBrush(Color.FromArgb(0xC0, 0x18, 0x17, 0x22)),
             Padding = new Thickness(12, 8, 12, 8),
             FontSize = 15,
@@ -68,7 +70,7 @@ public partial class HudCalibrationWindow : Window
 
         _selection = new Rectangle
         {
-            Stroke = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A)),
+            Stroke = Theme.AccentGold,
             StrokeThickness = 2,
             Fill = new SolidColorBrush(Color.FromArgb(0x40, 0xE8, 0xC4, 0x4A)),
             Visibility = Visibility.Collapsed,

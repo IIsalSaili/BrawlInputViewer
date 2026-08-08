@@ -5,18 +5,22 @@ namespace BrawlhallaOverlay;
 /// <summary>
 /// Contenu du "Parcours" (docs/plan_ux_onboarding.md §4) : chapitre 0 (prise en main de l'app,
 /// aucune donnée de jeu — pas de risque de citation fabriquée), chapitre 1 (survivre), chapitre 2
-/// (frapper), chapitre 3 (bouger) et chapitre 4 (premier vrai combo), mécaniques sourcées
-/// explicitement — voir SourceNote sur chaque leçon concernée. Chapitre 3 : le plan prévoyait
-/// 4 leçons (dash, dash jump, backdash, dodge directionnel comme outil de déplacement) mais
-/// l'utilisateur a clarifié que la 4ᵉ n'est pas une mécanique séparée — l'esquive directionnelle
-/// aérienne est déjà couverte par la leçon 1.1, son usage comme "option de recover en plus" est un
-/// simple à-côté, pas de leçon dédiée pour éviter la redondance. Chapitre 4 (Version 22) : ne
-/// source aucune nouvelle donnée de jeu — reprend littéralement deux combos Blasters déjà vérifiés
-/// dans WeaponComboPresets.Table (seuil de Dex le plus bas du fichier, 3+, donc jouables par la
-/// quasi-totalité des légendes), c'est la pièce qui relie le Parcours au moteur ComboRunner que le
-/// reste de l'app utilise déjà. Chapitre 5 du plan (techniques avancées) reste volontairement pas
-/// fait — à sourcer progressivement de la même façon (voir CLAUDE.md, "Version 13"/"Version
-/// 14"/"Version 15"/"Version 16"/"Version 22").
+/// (frapper) et chapitre 3 (bouger), mécaniques sourcées explicitement — voir SourceNote sur
+/// chaque leçon concernée. Chapitre 3 : le plan prévoyait 4 leçons (dash, dash jump, backdash,
+/// dodge directionnel comme outil de déplacement) mais l'utilisateur a clarifié que la 4ᵉ n'est
+/// pas une mécanique séparée — l'esquive directionnelle aérienne est déjà couverte par la leçon
+/// 1.1, son usage comme "option de recover en plus" est un simple à-côté, pas de leçon dédiée
+/// pour éviter la redondance.
+/// Un chapitre 4 "Ton premier vrai combo" (reprenant deux combos Blasters de
+/// WeaponComboPresets.cs) a existé un temps (Version 22) puis a été **retiré** sur demande
+/// explicite de l'utilisateur (2026-08-08) : « dans le tuto on apprend pas de combo » — le
+/// Parcours enseigne des mécaniques de jeu, pas des combos, ce rôle appartient déjà entièrement au
+/// mode Tutoriel/Entraînement (WeaponComboPresets.cs, ComboRunner). Ne pas réintroduire de leçon
+/// de combo ici, même sourcée correctement — la limite est une question de rôle, pas de fiabilité
+/// du contenu.
+/// Chapitre 5 du plan (techniques avancées) reste volontairement pas fait — à sourcer
+/// progressivement de la même façon (voir CLAUDE.md, "Version 13"/"Version 14"/"Version
+/// 15"/"Version 16").
 ///
 /// Méthode de sourcing (Chapitres 1 et 2, 2026-08-03) : question directe posée à l'utilisateur
 /// (qui joue réellement) en premier, recoupée avec une source écrite (brawlhalla.wiki.gg/wiki/Movement)
@@ -265,51 +269,6 @@ public static class ParcoursCurriculum
             // le drill vérifie l'orientation.
             VerifyYourselfNote = "L'app ne connaît pas le sens où ton personnage regarde — en jeu, backdash veut dire dasher vers l'arrière par rapport à ton orientation, pas forcément vers la gauche. Concrètement, ce drill se valide avec Gauche OU Droite : c'est à toi de vérifier en jeu que tu pars bien vers l'arrière.",
             SourceNote = "Confirmé par l'utilisateur (expérience de jeu personnelle) : même mécanique que le Dash, vers l'arrière, pour distance/whiff punish, 2026-08-03.",
-        },
-
-        // ================= Chapitre 4 — Ton premier vrai combo =================
-        // Contrairement aux chapitres précédents, aucune nouvelle affirmation de jeu n'est
-        // introduite ici : les deux séquences ci-dessous sont recopiées littéralement des combos
-        // Blasters déjà vérifiés dans WeaponComboPresets.Table ("DLight vers NLight" / "DLight vers
-        // SAir"), pas de nouvelle donnée à sourcer. Choisies pour leur seuil de Dex le plus bas (3+)
-        // de tout WeaponComboPresets — jouables par la quasi-totalité des légendes du jeu, contexte
-        // idéal pour une toute première combo.
-        new Lesson
-        {
-            Id = "4.1",
-            Chapter = 4,
-            ChapterTitle = "Ton premier vrai combo",
-            Title = "dLight > nLight",
-            Objective = "Ta première combo réelle : attaque légère basse, puis attaque légère neutre.",
-            Explanation = "Un « true combo » enchaîne deux coups sans que l'adversaire puisse esquiver entre les deux — contrairement à un simple enchaînement de boutons, ça touche vraiment en match. Celle-ci (dLight > nLight, aux Blasters) est l'une des plus accessibles du jeu : jouable dès 3 de Dex, donc par la quasi-totalité des légendes.",
-            Kind = LessonValidationKind.Sequence,
-            Sequence = new()
-            {
-                new LessonStep { RequiredActions = new() { "Bas", "Att. légère" } },
-                new LessonStep { RequiredActions = new() { "Att. légère" } },
-            },
-            FullyValidatedByApp = false,
-            VerifyYourselfNote = "L'app valide l'ordre des boutons, pas si le premier coup a réellement touché l'adversaire en jeu (condition réelle pour que le second connecte comme un vrai true combo).",
-            SourceNote = "Combo « DLight vers NLight » (Blasters, 3+ Dex) de WeaponComboPresets.cs, elle-même sourcée sur des true combos testés à 0% de dégâts fournis par l'utilisateur (voir CLAUDE.md) — reprise ici telle quelle, aucune nouvelle donnée introduite.",
-        },
-        new Lesson
-        {
-            Id = "4.2",
-            Chapter = 4,
-            ChapterTitle = "Ton premier vrai combo",
-            Title = "dLight > sAir",
-            Objective = "Une combo un peu plus longue : la même ouverture, suivie d'un saut vers un aérien.",
-            Explanation = "Toujours aux Blasters et toujours 3+ Dex : dLight, puis un saut, puis une attaque légère latérale en l'air (sAir). Une fois dLight > nLight à l'aise, ce genre de variante à 3 étapes est le pas suivant naturel — dans l'onglet Combos du panneau de contrôle, les combos qui partagent ainsi un début commun sont regroupées et indentées (« familles de combos ») pour repérer ces enchaînements facilement.",
-            Kind = LessonValidationKind.Sequence,
-            Sequence = new()
-            {
-                new LessonStep { RequiredActions = new() { "Bas", "Att. légère" } },
-                new LessonStep { RequiredActions = new() { "Saut" } },
-                new LessonStep { RequiredActions = new() { "Droite", "Att. légère" } },
-            },
-            FullyValidatedByApp = false,
-            VerifyYourselfNote = "Comme pour 4.1, l'app valide la séquence d'inputs, pas si chaque coup a réellement touché l'adversaire en jeu.",
-            SourceNote = "Combo « DLight vers SAir » (Blasters, 3+ Dex) de WeaponComboPresets.cs, même source que la leçon 4.1 — reprise ici telle quelle.",
         },
     };
 }

@@ -21,7 +21,6 @@ namespace BrawlhallaOverlay;
 /// </summary>
 public partial class ComboEditorWindow : Window
 {
-    private static readonly Brush TextColor = Brushes.White;
 
     private readonly Combo? _existing;
     private readonly StackPanel _stepsPanel = new();
@@ -61,13 +60,13 @@ public partial class ComboEditorWindow : Window
         var root = new StackPanel();
 
         var titleText = _isRecordingReview ? "Vérifier le combo enregistré" : _existing is null ? "Nouveau combo" : "Modifier le combo";
-        root.Children.Add(new TextBlock { Text = titleText, Foreground = TextColor, FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12) });
+        root.Children.Add(new TextBlock { Text = titleText, Foreground = Theme.TextPrimary, FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12) });
         if (_isRecordingReview)
         {
             root.Children.Add(new TextBlock
             {
                 Text = "Vérifie les étapes capturées (supprime une étape parasite, ajuste les tolérances) avant de valider — rien n'est encore sauvegardé.",
-                Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                Foreground = Theme.TextSubtle,
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10),
@@ -130,7 +129,7 @@ public partial class ComboEditorWindow : Window
         root.Children.Add(new TextBlock
         {
             Text = "Le mouvement (direction, Saut, Esquive/Dash) entre les coups est toujours autorisé, quoi qu'il arrive — seule une mauvaise Att. légère/Att. forte/Lancer fait échouer une étape. La confirmation de hit HUD (si calibrée) vérifie de toute façon que le combo touche vraiment.",
-            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            Foreground = Theme.TextSubtle,
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
@@ -142,18 +141,18 @@ public partial class ComboEditorWindow : Window
         root.Children.Add(new TextBlock
         {
             Text = "Le knockback augmente avec les dégâts déjà subis par l'adversaire : certaines combos ne connectent que jusqu'à un certain %. Laisse vide si tu ne sais pas — mieux vaut vide que faux.",
-            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            Foreground = Theme.TextSubtle,
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
         });
 
-        root.Children.Add(new TextBlock { Text = "Étapes (dans l'ordre)", Foreground = TextColor, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 8, 0, 6) });
+        root.Children.Add(new TextBlock { Text = "Étapes (dans l'ordre)", Foreground = Theme.TextPrimary, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 8, 0, 6) });
 
         root.Children.Add(new TextBlock
         {
             Text = "Clique « Écouter » sur une étape puis appuie sur une touche/bouton : ça ajoute une puce. Reclique sur la même étape pour ajouter une touche pressée en même temps (ex. Droite + Att. légère). « + Ajouter une étape » démarre la suivante. Les champs Max/Min (ms) sont purement indicatifs : ils règlent la vitesse de la barre de tolérance visuelle affichée en jeu, mais n'affectent plus la réussite/l'échec du combo (seule une mauvaise touche fait échouer une étape).",
-            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            Foreground = Theme.TextSubtle,
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
@@ -164,10 +163,10 @@ public partial class ComboEditorWindow : Window
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         stepsHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-        var maxHeader = new TextBlock { Text = "Max (indicatif)", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), TextWrapping = TextWrapping.Wrap };
+        var maxHeader = new TextBlock { Text = "Max (indicatif)", FontSize = 10, Foreground = Theme.TextSubtle, TextWrapping = TextWrapping.Wrap };
         Grid.SetColumn(maxHeader, 1);
         stepsHeader.Children.Add(maxHeader);
-        var minHeader = new TextBlock { Text = "Min (indicatif)", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), TextWrapping = TextWrapping.Wrap };
+        var minHeader = new TextBlock { Text = "Min (indicatif)", FontSize = 10, Foreground = Theme.TextSubtle, TextWrapping = TextWrapping.Wrap };
         Grid.SetColumn(minHeader, 2);
         stepsHeader.Children.Add(minHeader);
         root.Children.Add(stepsHeader);
@@ -203,7 +202,7 @@ public partial class ComboEditorWindow : Window
     private static TextBlock FieldLabel(string text, bool inline = false) => new()
     {
         Text = text,
-        Foreground = TextColor,
+        Foreground = Theme.TextPrimary,
         VerticalAlignment = inline ? VerticalAlignment.Center : VerticalAlignment.Top,
         Margin = inline ? new Thickness(0) : new Thickness(0, 0, 0, 2),
     };
@@ -232,7 +231,7 @@ public partial class ComboEditorWindow : Window
             chipsPanel.Children.Clear();
             foreach (var action in stepActions)
             {
-                var chipText = new TextBlock { Text = action, Foreground = TextColor, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 2, 0) };
+                var chipText = new TextBlock { Text = action, Foreground = Theme.TextPrimary, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 2, 0) };
                 var removeChipBtn = new Button { Content = "✕", FontSize = 9, Padding = new Thickness(4, 0, 4, 0), Margin = new Thickness(0, 1, 6, 1), VerticalAlignment = VerticalAlignment.Center };
                 removeChipBtn.Click += (_, _) => { stepActions.Remove(action); RefreshChips(); };
 

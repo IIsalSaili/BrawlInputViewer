@@ -192,22 +192,18 @@ public partial class MainWindow : Window
     // Tutoriel (bug de contraste relevé en même temps que ce changement de pack,
     // voir docs/audit_features.md). "green" = étape réussie, "red" = flash d'échec,
     // "orange" = bonnes touches mais hit HUD non confirmé (voir ComboRunner.HitNotConfirmed).
-    private static readonly SolidColorBrush IconBrushDefault = new((Color)ColorConverter.ConvertFromString("#E8C44A"));
-    private static readonly SolidColorBrush IconBrushSuccess = new((Color)ColorConverter.ConvertFromString("#55D98B"));
-    private static readonly SolidColorBrush IconBrushFail = new((Color)ColorConverter.ConvertFromString("#E4574C"));
-    private static readonly SolidColorBrush IconBrushHitPending = new((Color)ColorConverter.ConvertFromString("#F0A030"));
     // "slow" = bonnes touches mais délai maximum entre deux coups dépassé (ComboFailReason.Timeout).
     // Teinte distincte du rouge (mauvaise touche) ET de l'orange (hit non confirmé) pour que les
-    // trois causes d'échec se lisent d'un coup d'œil — voir audit 2026-08-07 §M10.
-    private static readonly SolidColorBrush IconBrushTooSlow = new((Color)ColorConverter.ConvertFromString("#7FA6FF"));
+    // trois causes d'échec se lisent d'un coup d'œil — voir audit 2026-08-07 §M10. Valeurs
+    // centralisées dans Core/Theme.cs (StateSuccess/StateFail/StateWarning/StateSlow).
 
     private static Brush IconBrushForVariant(string variant) => variant switch
     {
-        "green" => IconBrushSuccess,
-        "red" => IconBrushFail,
-        "orange" => IconBrushHitPending,
-        "slow" => IconBrushTooSlow,
-        _ => IconBrushDefault,
+        "green" => Theme.StateSuccess,
+        "red" => Theme.StateFail,
+        "orange" => Theme.StateWarning,
+        "slow" => Theme.StateSlow,
+        _ => Theme.AccentGold,
     };
 
     private bool _quizRevealed;
@@ -269,6 +265,11 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // Mutuellement exclusif avec ParcoursWindow (voir AppState.OverlayRunning) — consulté par
+        // DashboardWindow avant d'ouvrir le Parcours pendant que l'overlay tourne.
+        AppState.OverlayRunning = true;
+        AppState.CloseOverlayRequested = Close;
+
         RebuildBindMaps();
         // Positionne/dimensionne la fenêtre AVANT son premier affichage (audit 2026-08-07 §F6) :
         // ApplyWorkArea n'était appelé que dans MainWindow_Loaded, donc l'overlay était brièvement
@@ -319,6 +320,8 @@ public partial class MainWindow : Window
             if (_trayIconHandle != IntPtr.Zero) { DestroyIcon(_trayIconHandle); _trayIconHandle = IntPtr.Zero; }
             _dashboard?.Close();
             _controlBar?.Close();
+            AppState.OverlayRunning = false;
+            AppState.CloseOverlayRequested = null;
         };
     }
 
@@ -434,6 +437,7 @@ public partial class MainWindow : Window
         _comboNameText = new TextBlock
         {
             FontSize = 14,
+            FontFamily = Theme.AccentFontFamily,
             FontWeight = FontWeights.SemiBold,
             Foreground = Brushes.White,
             VerticalAlignment = VerticalAlignment.Center,
@@ -544,16 +548,17 @@ public partial class MainWindow : Window
 
         var panel = new Border
         {
-            // Même teinte bleu-nuit que le reste de l'UI (cohérence de marque, Brawhl.md
-            // section 4), mais bien plus transparente qu'avant (0x77 → 0x40 d'alpha) et avec un
-            // padding réduit : retour utilisateur explicite que l'ancien panneau masquait trop
-            // d'écran ("le carré gris immonde"). Bordure basse en accent doré conservée (évoque
-            // le motif "nameplate" de l'UI Brawlhalla) mais plus fine.
-            Background = new SolidColorBrush(Color.FromArgb(0x40, 0x1B, 0x1B, 0x24)),
-            CornerRadius = new CornerRadius(10),
+            // Même teinte bleu-nuit que le reste de l'UI (cohérence de marque), mais bien plus
+            // transparente qu'avant (0x77 → 0x40 d'alpha) et avec un padding réduit : retour
+            // utilisateur explicite que l'ancien panneau masquait trop d'écran ("le carré gris
+            // immonde"). Bordure basse épaisse conservée (évoque le motif "nameplate" de l'UI
+            // Brawlhalla) combinée au motif "écusson" (coins hauts plus prononcés, Theme.CrestMain)
+            // pour le même effet de marque sans toucher à l'opacité/légibilité déjà validées en jeu.
+            Background = Theme.OverlayPanelBg,
+            CornerRadius = Theme.CrestMain,
             Padding = new Thickness(14, 8, 14, 8),
             BorderThickness = new Thickness(1, 1, 1, 2),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x55, 0xE8, 0xC4, 0x4A)),
+            BorderBrush = Theme.OverlayPanelBorder,
             Child = content,
         };
 
@@ -577,7 +582,7 @@ public partial class MainWindow : Window
                 Content = glyph,
                 FontSize = 16,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xC4, 0x4A)),
+                Foreground = Theme.AccentGold,
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(10, 0, 10, 0),
@@ -704,17 +709,17 @@ public partial class MainWindow : Window
         if (minDex <= stats.Dex)
         {
             _dexRequirementText.Text = $"Dex requis : {minDex}+ — {legend} l'a déjà (Dex {stats.Dex})";
-            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromRgb(0x2E, 0xCC, 0x71));
+            _dexRequirementText.Foreground = Theme.StateSuccess;
         }
         else if (minDex == stats.Dex + 1)
         {
             _dexRequirementText.Text = $"Dex requis : {minDex}+ — jouable avec une stance (+1 Dex, {legend} est à {stats.Dex} de base)";
-            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromRgb(0xE6, 0x7E, 0x22));
+            _dexRequirementText.Foreground = Theme.StateWarning;
         }
         else
         {
             _dexRequirementText.Text = $"Dex requis : {minDex}+ — impossible sur {legend} même avec une stance (max {stats.Dex + 1})";
-            _dexRequirementText.Foreground = new SolidColorBrush(Color.FromRgb(0xE7, 0x4C, 0x3C));
+            _dexRequirementText.Foreground = Theme.StateFail;
         }
     }
 
@@ -813,7 +818,7 @@ public partial class MainWindow : Window
                     var shape = new System.Windows.Shapes.Path
                     {
                         Data = Geometry.Parse(geometryData),
-                        Fill = IconBrushDefault,
+                        Fill = Theme.AccentGold,
                         Stretch = Stretch.Uniform,
                         Width = size,
                         Height = size,
@@ -1636,9 +1641,19 @@ public partial class MainWindow : Window
         if (IsAlt(vkCode)) _altDown = true;
 
         // Resynchronisation avec l'état réel du clavier (voir IsModifierHeld) : le suivi
-        // incrémental sert de chemin rapide, GetAsyncKeyState fait foi.
-        if (_ctrlDown && !CtrlHeldNow()) _ctrlDown = false;
-        if (_altDown && !AltHeldNow()) _altDown = false;
+        // incrémental sert de chemin rapide, GetAsyncKeyState fait foi — SAUF pour le
+        // modificateur que CET événement vient tout juste de presser lui-même. Interrogé de
+        // façon synchrone depuis le hook bas niveau, GetAsyncKeyState peut encore refléter
+        // l'état D'AVANT cet appui (rien ne garantit que la table d'état clavier globale de
+        // Windows soit déjà à jour au moment où le hook se déclenche) : sans cette exclusion,
+        // l'appui même de Ctrl (ou Alt) repassait _ctrlDown/_altDown à faux dans la même frappe
+        // qui venait de le passer à vrai, et plus aucun raccourci Ctrl+Alt+* ne pouvait jamais
+        // se déclencher — régression du correctif §M18, qui visait pourtant à fiabiliser ce
+        // suivi. Le cas que §M18 corrigeait (drapeau resté bloqué à vrai après un KeyUp avalé)
+        // reste couvert : il est détecté au prochain appui d'une AUTRE touche, une fois l'état
+        // global bien réellement à jour.
+        if (_ctrlDown && !IsCtrl(vkCode) && !CtrlHeldNow()) _ctrlDown = false;
+        if (_altDown && !IsAlt(vkCode) && !AltHeldNow()) _altDown = false;
 
         // Toutes les touches finales ci-dessous sont reconfigurables individuellement (onglet
         // Général, réglages avancés du panneau de contrôle) — seule la touche finale change, le
