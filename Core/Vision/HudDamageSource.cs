@@ -4,7 +4,7 @@ using System.Threading;
 namespace BrawlhallaOverlay;
 
 /// <summary>
-/// Phase 1a de docs/plan_improve_combo.md §3.1.1a : détecte qu'un hit a probablement eu lieu
+/// Détecte qu'un hit a probablement eu lieu
 /// en surveillant une petite zone du HUD (dégâts adverses) pour un changement de pixels — pas
 /// d'OCR, pas de montant, juste "quelque chose a changé là où les dégâts s'affichent". Poll à
 /// basse fréquence (même principe que ComboRunner.CheckMoveTimeout / AutoHideEnabled : un
@@ -47,9 +47,7 @@ public sealed class HudDamageSource : IDisposable
     // (2026-08-06) : 0.08 ne détectait que les changements massifs (mort du personnage, reset
     // de jauge) et ratait les changements de chiffre normaux — un changement "23%→35%" ne
     // couvre qu'une petite fraction d'une ROI qui inclut un peu de marge autour du texte.
-    // Abaissé nettement ; si ça produit des faux positifs qu'un seuil simple ne filtre pas
-    // (voir docs/plan_improve_combo.md, critère d'abandon 1a), on arrête là plutôt que d'aller
-    // vers l'OCR sur une base instable.
+    // Abaissé nettement.
     private const double ChangedPixelRatioThreshold = 0.015;
 
     // Un lancement d'arme (action "Lancer") fait souvent 1-2 points de dégâts — un seul

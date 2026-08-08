@@ -10,7 +10,7 @@ namespace BrawlhallaOverlay;
 /// <summary>
 /// Fenêtre plein écran (sur le moniteur ciblé par Settings.MonitorIndex) qui laisse
 /// l'utilisateur dessiner au clic-glisser un rectangle autour de la zone de dégâts adverse
-/// du HUD Brawlhalla — voir docs/plan_improve_combo.md §3.1.1a/§6. Le rectangle choisi est
+/// du HUD Brawlhalla. Le rectangle choisi est
 /// converti en pixels physiques d'écran (coordonnées System.Windows.Forms.Screen) et exposé
 /// via <see cref="Result"/> pour que l'appelant l'écrive dans OverlaySettings.
 /// </summary>

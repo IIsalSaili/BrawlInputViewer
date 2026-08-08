@@ -231,7 +231,7 @@ public partial class MainWindow : Window
     private DateTime _lastInputTime = DateTime.UtcNow;
     private bool _autoHidden;
 
-    // --- Vision (phase 1, docs/plan_improve_combo.md) : les instances vivent dans AppState
+    // --- Vision (lecture passive du HUD) : les instances vivent dans AppState
     // (voir AppState.HudDamageSource/HudTierSource), MainWindow ne fait que les démarrer/arrêter
     // selon les réglages et réagir à leurs événements.
     private (bool Enabled, int X, int Y, int W, int H) _lastAppliedHudSettings;
@@ -2061,14 +2061,22 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            // Le carré affiche la couleur brute captée (utile pour vérifier que le calibrage
-            // vise la bonne zone), mais le texte fait foi sur AppState.HudTierSource.CurrentTier
-            // (l'état de la machine à états, voir HudDamageTierSource) — pas sur la
-            // classification par teinte de ce seul échantillon, qui n'est qu'un indice
-            // diagnostique et n'a plus besoin d'être exacte pour que la détection fonctionne.
+            // Le carré affiche la couleur brute captée (utile pour vérifier que le calibrage vise
+            // la bonne zone). Une seule valeur texte depuis le 2026-08-08 : la machine à états
+            // qui produisait la valeur "qui fait foi" a été supprimée (elle restait figée sur
+            // Blanc, voir HudDamageTierSource), il n'y a donc plus deux valeurs à confronter —
+            // juste la classification par teinte, stabilisée sur 2 lectures.
             _hudTierSwatchOverlay.Background = new SolidColorBrush(Color.FromRgb((byte)sample.R, (byte)sample.G, (byte)sample.B));
-            var hueNote = sample.HueHint is { } h ? HudTierLabel(h) : "indice teinte : non concluant";
-            _hudTierIndicatorText.Text = $"{HudTierLabel(AppState.HudTierSource.CurrentTier)}  ({hueNote})";
+            var stable = AppState.HudTierSource.CurrentTier;
+            var live = sample.HueHint;
+            // Tant que la lecture en cours confirme le palier stabilisé, un seul libellé suffit.
+            // Sinon on montre les deux : ça rend visible une transition en cours ou une zone mal
+            // calibrée (teinte qui saute d'un palier à l'autre sans jamais se stabiliser).
+            _hudTierIndicatorText.Text = stable is not { } s
+                ? (live is { } l ? $"Palier : en cours de lecture… ({HudTierLabel(l)})" : "Palier : zone non reconnue")
+                : live == s || live is null
+                    ? $"Palier : {HudTierLabel(s)}"
+                    : $"Palier : {HudTierLabel(s)} → {HudTierLabel(live.Value)} ?";
         });
     }
 

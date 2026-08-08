@@ -607,12 +607,14 @@ public partial class ControlPanelWindow : Window
         advancedPanel.Children.Add(hudTierLiveRow);
         void HudTierSampledHandler((int R, int G, int B, DamageTier? HueHint) sample) => Dispatcher.Invoke(() =>
         {
-            // Même principe que MainWindow.OnHudTierSampled : le palier affiché fait foi sur
-            // AppState.HudTierSource.CurrentTier (la machine à états), l'indice de teinte n'est
-            // qu'une info diagnostique en plus, pas la source de vérité.
+            // Même principe que MainWindow.OnHudTierSampled. Ici on garde les deux valeurs (la
+            // lecture brute de CETTE capture et le palier stabilisé) : c'est l'écran de calibrage,
+            // voir la teinte instantanée sauter est précisément ce qui permet de repérer une zone
+            // mal cadrée. En jeu, l'overlay n'en montre qu'une (voir MainWindow).
             hudTierSwatch.Background = new SolidColorBrush(Color.FromRgb((byte)sample.R, (byte)sample.G, (byte)sample.B));
             var hueNote = sample.HueHint is { } t ? HudTierLabel(t) : "non concluant";
-            hudTierLiveText.Text = $"rgb({sample.R},{sample.G},{sample.B}) — palier détecté : {HudTierLabel(AppState.HudTierSource.CurrentTier)}  (indice teinte : {hueNote})";
+            var stable = AppState.HudTierSource.CurrentTier is { } s ? HudTierLabel(s) : "pas encore stabilisé";
+            hudTierLiveText.Text = $"rgb({sample.R},{sample.G},{sample.B}) — lecture : {hueNote}  ·  palier retenu : {stable}";
         });
         AppState.HudTierSource.Sampled += HudTierSampledHandler;
 

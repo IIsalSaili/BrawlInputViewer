@@ -87,7 +87,7 @@ public sealed class OverlaySettings
     public bool AutoHideEnabled { get; set; }
     public int AutoHideIdleSeconds { get; set; } = 6;
 
-    /// <summary>Détection de hit par lecture d'écran (phase 1a de docs/plan_improve_combo.md) :
+    /// <summary>Détection de hit par lecture d'écran :
     /// capture périodique d'une petite zone du HUD (dégâts adverses) et détection d'un
     /// changement de pixels, sans OCR — juste "un hit a probablement eu lieu", jamais un montant.
     /// Depuis la Version 24 (voir CLAUDE.md), gate aussi ComboRunner.RequireHitConfirmation — ne
@@ -115,7 +115,7 @@ public sealed class OverlaySettings
     public int HudRoiWidth { get; set; } = 42;
     public int HudRoiHeight { get; set; } = 39;
 
-    /// <summary>Palier de dégâts par couleur (phase 1b, docs/plan_improve_combo.md §3.1.1) :
+    /// <summary>Palier de dégâts par couleur :
     /// contrairement à HudRoiX/Y/Width/Height (diff de pixels sur le nombre de dégâts, nécessite
     /// l'option "Nombre de dégâts" activée en jeu), celle-ci lit la couleur de la barre sous
     /// l'icône adverse (toujours visible, aucun réglage de jeu requis) et la classe en

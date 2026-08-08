@@ -5,10 +5,9 @@ namespace BrawlhallaOverlay;
 /// <summary>
 /// Capture GDI (System.Drawing.Graphics.CopyFromScreen) d'un petit rectangle d'écran en
 /// pixels physiques. Volontairement pas Windows.Graphics.Capture/DXGI : pour une ROI de
-/// quelques centaines de pixels à ~16 Hz (voir HudDamageSource.PollIntervalMs — la mention
-/// "8-10 Hz" datait d'avant la Version 24, audit 2026-08-07 §F10), BitBlt classique est
-/// largement suffisant et évite toute l'interop WinRT (device D3D11, DispatcherQueueController)
-/// que demanderait WGC pour un gain de perf ici inutile — voir docs/plan_improve_combo.md §4.1.
+/// quelques centaines de pixels à ~16 Hz (voir HudDamageSource.PollIntervalMs), BitBlt
+/// classique est largement suffisant et évite toute l'interop WinRT (device D3D11,
+/// DispatcherQueueController) que demanderait WGC pour un gain de perf ici inutile.
 /// Même limite que le reste de l'overlay : ne capture pas un jeu en plein écran exclusif.
 /// </summary>
 public static class ScreenRegionCapture

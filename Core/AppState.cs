@@ -22,7 +22,7 @@ public static class AppState
     // silencieusement (voir GamepadHook.Poll) sans coût notable.
     public static GamepadHook Gamepad { get; } = new();
 
-    // Sources de vision (docs/plan_improve_combo.md, phase 1) : partagées comme Hook/Gamepad
+    // Sources de vision (lecture passive du HUD, voir CLAUDE.md Core/Vision/) : partagées comme Hook/Gamepad
     // pour que MainWindow (qui les démarre/arrête selon Settings) ET ControlPanelWindow (qui a
     // besoin de s'abonner à leur événement Sampled pour un aperçu en direct pendant le
     // calibrage) accèdent à la même instance, sans passer par MainWindow.
