@@ -31,6 +31,18 @@ public partial class App : Application
             if (args.ExceptionObject is Exception ex) DiagnosticLog.LogException("AppDomain.UnhandledException", ex);
         };
 
+        // §PATCH-7 (2026-08-09) : le hook clavier/manette n'était démarré que par
+        // MainWindow_Loaded / ParcoursWindow.Loaded — mais ControlPanelWindow/ComboEditorWindow
+        // sont accessibles bien avant l'un ou l'autre (bouton "Réglages avancés…" dès le tout
+        // premier écran de la Dashboard) et écoutent AppState.Hook.KeyDown /
+        // AppState.Gamepad.ButtonDown pour la réassignation de touche ("Écouter"). Sans hook
+        // démarré, cette écoute expirait silencieusement au bout de 6s sans avoir jamais rien
+        // reçu. Start() est idempotent des deux côtés (garde déjà en place dans KeyboardHook et
+        // GamepadHook), donc le redémarrer plus tard depuis MainWindow/ParcoursWindow ne fait rien
+        // de plus.
+        AppState.Hook.Start();
+        AppState.Gamepad.Start();
+
         // Pas de StartupUri XAML fixe : DashboardWindow fusionnée gère les deux flux (fourche
         // onboarding si OnboardingCompleted est faux, flux complet sinon). Voir Phase 1 du plan de
         // refonte UX.

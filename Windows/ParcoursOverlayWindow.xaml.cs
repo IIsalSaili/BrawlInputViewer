@@ -80,7 +80,20 @@ public partial class ParcoursOverlayWindow : Window
         // volontairement indépendantes, voir la docstring de classe).
         UpdateSuspendedBanner(AppState.CaptureSuspended);
         AppState.CaptureSuspendedChanged += OnCaptureSuspendedChanged;
-        Closed += (_, _) => AppState.CaptureSuspendedChanged -= OnCaptureSuspendedChanged;
+
+        // §PATCH-8 (2026-08-09) : sans cet abonnement, changer l'écran ciblé (onglet Apparence de
+        // ControlPanelWindow, réglage Settings.MonitorIndex) pendant que le Parcours est ouvert ne
+        // repositionnait jamais ce bandeau — GetTargetWorkArea() lit bien la valeur à jour, mais
+        // Reposition() n'était appelé qu'à la construction et sur SizeChanged, jamais sur un
+        // changement de réglage. MainWindow a l'équivalent (OnSettingsChanged -> ApplyWorkArea) ;
+        // ce bandeau, lui, n'avait rien. Contrairement à MainWindow, le Parcours peut tourner seul
+        // (sans overlay), donc ce n'est pas un cas couvert ailleurs par accident.
+        AppState.SettingsChanged += Reposition;
+        Closed += (_, _) =>
+        {
+            AppState.CaptureSuspendedChanged -= OnCaptureSuspendedChanged;
+            AppState.SettingsChanged -= Reposition;
+        };
     }
 
     private void OnCaptureSuspendedChanged(bool suspended) => Dispatcher.Invoke(() => UpdateSuspendedBanner(suspended));

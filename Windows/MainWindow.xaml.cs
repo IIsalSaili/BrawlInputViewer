@@ -255,6 +255,13 @@ public partial class MainWindow : Window
     private TextBlock _toastBadge = null!;
     private DispatcherTimer? _toastBadgeTimer;
 
+    // §PATCH-1 (2026-08-09) : ces deux handlers d'AppState (branchés par BuildTrayIcon) doivent
+    // rester nommés pour pouvoir être désabonnés à la fermeture — sinon ils restent accrochés
+    // indéfiniment aux events statiques d'AppState (voir Closed), gardant vivants le
+    // ToolStripMenuItem/NotifyIcon fermés à chaque réouverture de l'overlay.
+    private Action<bool>? _trayCaptureSuspendedHandler;
+    private Action<bool>? _trayOverlayHiddenHandler;
+
     // --- Dashboard (fenêtre d'accueil, ouverte à la demande en mode in-game — voir OpenDashboard) ---
     private DashboardWindow? _dashboard;
 
@@ -296,6 +303,15 @@ public partial class MainWindow : Window
         AppState.HudTierSource.Sampled += OnHudTierSampled;
         AppState.HudDamageSource.Sampled += OnHudRatioSampled;
 
+        // §PATCH-3 (2026-08-09) : sans ça, _padStartDown pouvait rester bloqué à `true` si la
+        // manette se déconnecte pendant que Start est tenu (GamepadHook.Poll ne lève jamais de
+        // ButtonUp sur une déconnexion, il remet juste _lastButtons à 0 en silence — voir
+        // GamepadHook.cs) — un simple appui solo sur RB/LB/Back/X après reconnexion était alors
+        // réinterprété à tort comme un chord Start+bouton. Même principe que la resynchronisation
+        // Ctrl/Alt du clavier (CtrlHeldNow/AltHeldNow), mais via l'event de connexion : XInput
+        // n'offre pas d'équivalent GetAsyncKeyState pour un bouton individuel.
+        AppState.Gamepad.ConnectionChanged += OnGamepadConnectionChanged;
+
         Loaded += MainWindow_Loaded;
         Closed += (_, _) =>
         {
@@ -314,6 +330,27 @@ public partial class MainWindow : Window
             AppState.HudDamageSource.Sampled -= OnHudRatioSampled;
             AppState.HudDamageSource.HitDetected -= OnHudHitDetected;
             AppState.HudTierSource.TierChanged -= OnHudTierChanged;
+            AppState.Gamepad.ConnectionChanged -= OnGamepadConnectionChanged;
+            if (_trayCaptureSuspendedHandler is not null) AppState.CaptureSuspendedChanged -= _trayCaptureSuspendedHandler;
+            if (_trayOverlayHiddenHandler is not null) AppState.OverlayHiddenChanged -= _trayOverlayHiddenHandler;
+
+            // §PATCH-1 (2026-08-09) : ces DispatcherTimer n'étaient jamais arrêtés à la fermeture.
+            // Un DispatcherTimer est retenu vivant par le Dispatcher lui-même, indépendamment du
+            // GC de la fenêtre propriétaire — sans Stop(), chacun continuait de tiquer contre un
+            // _comboRunner/des éléments visuels déjà fermés à chaque cycle Dashboard → fermer
+            // l'overlay → en rouvrir un nouveau (DashboardWindow.LaunchOverlay/ApplySelectionLive),
+            // accumulant des timers fantômes (CPU perdu, doubles FlushPendingSaves/recalculs).
+            _comboTimer?.Stop();
+            _comboMoveTimeoutPollTimer?.Stop();
+            _hitConfirmationPollTimer?.Stop();
+            _saveFlushTimer?.Stop();
+            _autoHideCheckTimer?.Stop();
+            _quizRevealTimer?.Stop();
+            _chainComboTimer?.Stop();
+            _toleranceCountdownTimer?.Stop();
+            _comboCompletedResetTimer?.Stop();
+            _toastBadgeTimer?.Stop();
+
             AppState.FlushPendingSaves();
             if (_trayIcon is not null) _trayIcon.Visible = false;
             _trayIcon?.Dispose();
@@ -323,6 +360,15 @@ public partial class MainWindow : Window
             AppState.OverlayRunning = false;
             AppState.CloseOverlayRequested = null;
         };
+    }
+
+    /// <summary>§PATCH-3 (2026-08-09) : voir le commentaire d'abonnement dans le constructeur.
+    /// Une déconnexion pendant que Start est tenu ne lève jamais de GP_START ButtonUp, donc
+    /// _padStartDown resterait bloqué à vrai indéfiniment sans ce filet — un bouton solo pressé
+    /// après reconnexion serait alors pris à tort pour un chord.</summary>
+    private void OnGamepadConnectionChanged(bool connected)
+    {
+        if (!connected) _padStartDown = false;
     }
 
     private void RebuildBindMaps()
@@ -1467,12 +1513,14 @@ public partial class MainWindow : Window
 
         var suspendItem = new System.Windows.Forms.ToolStripMenuItem("Suspendre la capture (Ctrl+Alt+H)") { CheckOnClick = true };
         suspendItem.Click += (_, _) => Dispatcher.Invoke(AppState.ToggleCaptureSuspended);
-        AppState.CaptureSuspendedChanged += suspended => suspendItem.Checked = suspended;
+        _trayCaptureSuspendedHandler = suspended => suspendItem.Checked = suspended;
+        AppState.CaptureSuspendedChanged += _trayCaptureSuspendedHandler;
         menu.Items.Add(suspendItem);
 
         var hideItem = new System.Windows.Forms.ToolStripMenuItem("Masquer/afficher l'overlay (Ctrl+Alt+M)") { CheckOnClick = true };
         hideItem.Click += (_, _) => Dispatcher.Invoke(AppState.ToggleOverlayHidden);
-        AppState.OverlayHiddenChanged += hidden => hideItem.Checked = hidden;
+        _trayOverlayHiddenHandler = hidden => hideItem.Checked = hidden;
+        AppState.OverlayHiddenChanged += _trayOverlayHiddenHandler;
         menu.Items.Add(hideItem);
 
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());

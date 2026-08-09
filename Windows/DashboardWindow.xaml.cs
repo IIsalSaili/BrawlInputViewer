@@ -37,6 +37,16 @@ public partial class DashboardWindow : Window
     private string _onboardingProfile = "";
     private string? _onboardingChosenCharacter;
 
+    // §PATCH-6 (2026-08-09) : le profil Expert sautait entièrement l'écran "Voilà ce qui va se
+    // passer" — contrairement à ce que documente le résumé de classe ci-dessus ("Tous convergent
+    // sur..."), ChooseOnboardingProfile("Expert") allait droit à BuildMainFlow, et son bouton
+    // "▶ Lancer en jeu" appelle LaunchOverlay() directement. Un premier utilisateur qui se
+    // choisit "Expert" cliquait donc en aveugle : la fenêtre bordée était remplacée sans
+    // avertissement par un overlay transparent/sans bordure/click-through. Ce drapeau fait
+    // intercepter le tout premier clic sur "Lancer en jeu" pendant l'onboarding Expert pour
+    // afficher cet écran avant de lancer réellement (voir BuildFooter).
+    private bool _expertAwaitingLaunchWarning;
+
     // Contrôles du flux principal
     private ComboBox _characterCombo = null!;
     private ComboBox _weaponCombo = null!;
@@ -137,6 +147,7 @@ public partial class DashboardWindow : Window
         if (profile == "Expert")
         {
             MarkOnboardingCompleted();
+            _expertAwaitingLaunchWarning = true;
             BuildMainFlow();
             return;
         }
@@ -225,7 +236,12 @@ public partial class DashboardWindow : Window
         return tile;
     }
 
-    private void ShowWhatHappensNext()
+    /// <param name="onConfirm">Action exécutée par le bouton "C'est parti" — par défaut
+    /// CompleteOnboardingAndLaunch (chemins Débutant/Connaisseur, qui n'ont pas encore appliqué
+    /// leur sélection). Le chemin Expert (§PATCH-6) passe LaunchOverlay à la place : la sélection
+    /// personnage/arme/combo/mode a déjà été faite dans BuildMainFlow avant d'arriver ici,
+    /// CompleteOnboardingAndLaunch l'aurait ignorée et lancé l'overlay sans elle.</param>
+    private void ShowWhatHappensNext(Action? onConfirm = null)
     {
         RootGrid.Children.Clear();
         var panel = new StackPanel { Margin = new Thickness(32), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 560 };
@@ -277,7 +293,7 @@ public partial class DashboardWindow : Window
             Margin = new Thickness(0, 28, 0, 0),
             Cursor = System.Windows.Input.Cursors.Hand,
         };
-        launchBtn.Click += (_, _) => CompleteOnboardingAndLaunch();
+        launchBtn.Click += (_, _) => (onConfirm ?? CompleteOnboardingAndLaunch)();
         panel.Children.Add(launchBtn);
 
         RootGrid.Children.Add(panel);
@@ -852,7 +868,19 @@ public partial class DashboardWindow : Window
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Right,
         };
-        launchBtn.Click += (_, _) => LaunchOverlay();
+        launchBtn.Click += (_, _) =>
+        {
+            // §PATCH-6 : premier "Lancer en jeu" du profil Expert — montre l'écran
+            // d'avertissement une seule fois avant de lancer réellement (voir
+            // _expertAwaitingLaunchWarning et ShowWhatHappensNext).
+            if (_expertAwaitingLaunchWarning)
+            {
+                _expertAwaitingLaunchWarning = false;
+                ShowWhatHappensNext(LaunchOverlay);
+                return;
+            }
+            LaunchOverlay();
+        };
         Grid.SetColumn(launchBtn, 2);
         row.Children.Add(launchBtn);
 

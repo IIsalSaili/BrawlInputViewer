@@ -1303,6 +1303,14 @@ public partial class ControlPanelWindow : Window
             var copy = JsonSerializer.Deserialize<Combo>(json)!;
             copy.Id = Guid.NewGuid().ToString("N");
             copy.Name = $"{original.Name} (copie)";
+            // §PATCH-4 (2026-08-09) : sans ça, la copie héritait aussi de BestStreak/
+            // TotalCompletions/TotalAttempts/Mastered de l'original — une variante tout juste
+            // créée s'affichait déjà "✓ maîtrisée" avec une série jamais jouée sur elle.
+            copy.BestStreak = 0;
+            copy.TotalCompletions = 0;
+            copy.TotalAttempts = 0;
+            copy.Mastered = false;
+            copy.UserModified = false;
             AppState.Combos.Add(copy);
             AppState.NotifyCombosMutated();
             RefreshCombosList();
@@ -1423,7 +1431,13 @@ public partial class ControlPanelWindow : Window
             return;
         }
 
-        if (bundle is null || bundle.Binds.Count == 0)
+        // §PATCH-5 (2026-08-09) : bundle.Combos n'était jamais vérifié avant d'être passé à
+        // AppState.ReplaceCombos, alors que ce fichier est un simple JSON qu'un utilisateur peut
+        // éditer à la main (ou un export antérieur/partiel où le champ "Combos" est absent ou
+        // explicitement null) — System.Text.Json désérialise alors bundle.Combos à null et
+        // NotifyCombosMutated plante avec une NullReferenceException non gérée au lieu du message
+        // "fichier invalide" affiché pour tout autre fichier malformé.
+        if (bundle is null || bundle.Binds is null || bundle.Binds.Count == 0 || bundle.Combos is null)
         {
             MessageBox.Show("Ce fichier ne contient pas de profil valide.", "Import impossible", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -1465,8 +1479,18 @@ public partial class ControlPanelWindow : Window
         };
         if (dialog.ShowDialog() != true) return;
 
+        // §PATCH-4 (2026-08-09) : exporter pour partager ne doit pas divulguer les stats de
+        // performance personnelles (série/tentatives/maîtrise) de celui qui exporte — écrit sur
+        // une copie plutôt que sur le combo réel pour ne rien perturber en mémoire.
+        var toExport = JsonSerializer.Deserialize<Combo>(JsonSerializer.Serialize(combo))!;
+        toExport.BestStreak = 0;
+        toExport.TotalCompletions = 0;
+        toExport.TotalAttempts = 0;
+        toExport.Mastered = false;
+        toExport.UserModified = false;
+
         var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(combo, options));
+        File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(toExport, options));
     }
 
     private void ImportCombo()
@@ -1502,6 +1526,15 @@ public partial class ControlPanelWindow : Window
         }
 
         imported.Id = Guid.NewGuid().ToString("N");
+        // §PATCH-4 (2026-08-09) : un combo importé depuis un fichier partagé par quelqu'un
+        // d'autre ne doit pas hériter de SES stats de performance (streak/tentatives/maîtrise) —
+        // sans ce reset il pouvait s'afficher "✓ maîtrisée" ou avec une meilleure série jamais
+        // atteinte par la personne qui importe.
+        imported.BestStreak = 0;
+        imported.TotalCompletions = 0;
+        imported.TotalAttempts = 0;
+        imported.Mastered = false;
+        imported.UserModified = false;
         AppState.Combos.Add(imported);
         AppState.NotifyCombosMutated();
         RefreshCombosList();

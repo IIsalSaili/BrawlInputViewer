@@ -496,17 +496,23 @@ public partial class ParcoursWindow : Window
 
         if (_currentLessonValidated) return;
 
+        // §PATCH-9 (2026-08-09) : les deux handlers validaient sur N'IMPORTE QUEL basculement,
+        // dans les deux sens — pas seulement l'action enseignée par la leçon (déverrouiller pour
+        // 0.2, suspendre pour 0.3). Si l'overlay était re-verrouillé pour une tout autre raison
+        // pendant que la leçon 0.2 est affichée (ex. déverrouillé plus tôt depuis le bouton
+        // d'en-tête), elle se serait validée toute seule sans que l'utilisateur ait jamais fait
+        // Ctrl+Alt+O. Chaque handler ne valide donc désormais que sur la transition enseignée.
         switch (lesson.ToggleEventName)
         {
             case "Lock":
                 Action<bool> lockHandler = null!;
-                lockHandler = _ => { AppState.LockChanged -= lockHandler; MarkValidated(); };
+                lockHandler = locked => { if (locked) return; AppState.LockChanged -= lockHandler; MarkValidated(); };
                 AppState.LockChanged += lockHandler;
                 _unsubscribeToggle = () => AppState.LockChanged -= lockHandler;
                 break;
             case "CaptureSuspended":
                 Action<bool> suspendHandler = null!;
-                suspendHandler = _ => { AppState.CaptureSuspendedChanged -= suspendHandler; MarkValidated(); };
+                suspendHandler = suspended => { if (!suspended) return; AppState.CaptureSuspendedChanged -= suspendHandler; MarkValidated(); };
                 AppState.CaptureSuspendedChanged += suspendHandler;
                 _unsubscribeToggle = () => AppState.CaptureSuspendedChanged -= suspendHandler;
                 break;
